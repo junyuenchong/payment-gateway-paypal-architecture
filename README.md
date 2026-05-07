@@ -1,16 +1,16 @@
 # PaymentWebhook
 
-One-page checkout demo built with NestJS + Next.js + PostgreSQL.
+Production-style payment webhook service built with NestJS + Next.js + PostgreSQL.
 
-## What this project shows
+## What this project demonstrates (production style)
 
-- Async payment checkout creation (BullMQ worker)
-- Webhook signature verification
-- Idempotent webhook/event handling
-- Row-locked status updates
-- Retry-safe workers
-- Frontend payment status table
-- **No email/notification side effects** (status update only)
+- Async payment checkout creation (BullMQ workers, idempotent, retry-safe)
+- Webhook signature verification + event table (`WebhookEvent`, `ProcessedEvent`)
+- Strong consistency on status updates (DB transaction + row lock + Redis distributed lock)
+- Clear state machine for payment lifecycle (including `EXPIRED` and safe retries)
+- Dead-letter queue with replay (`payment-dlq-queue` + `/ops` endpoints)
+- Frontend payment status table for intent vs live status (for observability)
+- **No side-effect notifications** (focus is on payment status only)
 
 ## Quick payment flow
 
@@ -219,7 +219,7 @@ Suggested demo flow:
 6. On repeated failures, jobs go to DLQ; we can inspect and replay with `/ops/dlq` endpoints.
 7. This gives a production-style payment flow: idempotent, retry-safe, observable, and recoverable.
 
-## Environment setup
+## Environment setup (production-style local)
 
 ### Backend (`backend/.env`)
 
@@ -278,3 +278,29 @@ Services:
 - Backend: `http://localhost:3000`
 - Redis: `localhost:6379`
 - Adminer: `http://localhost:8081`
+
+### Adminer / DB insight (for interview)
+
+- URL: `http://localhost:8081`
+- System: `PostgreSQL`
+- Server: `db` (from Docker Compose) or `localhost` (if using local Postgres)
+- Database: `payment`
+- User / Password: see `DATABASE_URL` in `backend/.env` (default `payment:payment`)
+
+Tables worth showing:
+
+- `Order`
+  - Columns: `status`, `paypalOrderId`, `approvalUrl`, `idempotencyKey`, timestamps
+  - Demo: how status moves from `UNPAID` → `PROCESSING` → `PAID` / `FAILED` / `CANCELLED` / `EXPIRED`
+- `WebhookEvent`
+  - Columns: `eventId`, `type`, `status`, `orderId`, `createdAt`, `processedAt`
+  - Demo: webhook deliveries and processing lifecycle
+- `ProcessedEvent`
+  - Columns: `eventId`, `provider`, `processedAt`
+  - Demo: webhook idempotency (same `eventId` only processed once)
+
+In an interview, you can open Adminer to show:
+
+1. A new `Order` row being created and moving through statuses.
+2. Corresponding `WebhookEvent` rows appearing when the gateway calls back.
+3. `ProcessedEvent` proving idempotent handling of external events.
