@@ -1,6 +1,6 @@
-# PaymentWebhook
+# payment-gateway-architecture
 
-Production-style payment webhook service built with NestJS + Next.js + PostgreSQL.
+Production-style payment gateway & webhook architecture built with NestJS + Next.js + PostgreSQL.
 
 ## What this project demonstrates (production style)
 
@@ -74,15 +74,15 @@ Combined flow summary:
 
 ## Payment statuses
 
-| Status                                          | Meaning                                      |
-| ----------------------------------------------- | -------------------------------------------- |
-| `UNPAID`                                        | Order created, payment not started           |
-| `PROCESSING`                                    | Payment started / waiting for gateway result |
+| Status                                          | Meaning                                        |
+| ----------------------------------------------- | ---------------------------------------------- |
+| `UNPAID`                                        | Order created, payment not started             |
+| `PROCESSING`                                    | Payment started / waiting for gateway result   |
 | `EXPIRED`                                       | Processing timed out (no final gateway result) |
-| `PAID`                                          | Payment successful                           |
-| `FAILED`                                        | Payment failed                               |
-| `CANCELLED`                                     | Payment cancelled                            |
-| `REFUNDING` / `PARTIALLY_REFUNDED` / `REFUNDED` | Reserved for refund flow                     |
+| `PAID`                                          | Payment successful                             |
+| `FAILED`                                        | Payment failed                                 |
+| `CANCELLED`                                     | Payment cancelled                              |
+| `REFUNDING` / `PARTIALLY_REFUNDED` / `REFUNDED` | Reserved for refund flow                       |
 
 UI note:
 
