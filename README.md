@@ -183,6 +183,12 @@ Suggested demo flow:
 | Capture payment           | `backend/src/modules/orders/application/handlers/capture-payment.handler.ts`       | `Order` by `orderId`       | Ensure single safe status transition during capture  |
 | Webhook processing        | `backend/src/modules/webhooks/webhook-process.service.ts`                          | `WebhookEvent` and `Order` | Ensure one webhook worker updates status at a time   |
 
+#### Short note on `SERIALIZABLE` (why it’s not the default here)
+
+PostgreSQL `SERIALIZABLE` isolation can prevent write-skew / phantom-style anomalies by making concurrent transactions behave *as if* they ran one-by-one. The trade-off is higher contention and possible `serialization_failure` errors that require **application-level retries**.
+
+In this project, the critical consistency requirement is “only one worker/request can advance an order’s status at a time”. Using `SELECT ... FOR UPDATE` row locks inside `prisma.$transaction` achieves that deterministically for the specific rows we care about, with simpler operational behavior than turning every transaction into `SERIALIZABLE`.
+
 ## Key files
 
 - Orders API: `backend/src/modules/orders/orders.controller.ts`
