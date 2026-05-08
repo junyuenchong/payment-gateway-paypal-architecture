@@ -1,53 +1,45 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import Redis from 'ioredis';
-import { randomUUID } from 'crypto';
+import { Injectable, Logger } from '@nestjs/common';
+import { CommandBus } from '@nestjs/cqrs';
 
-type LockHandle = {
-  key: string;
-  token: string;
-};
+import { toError } from '../common/error.util';
+import type { LockHandle } from './application/commands/lock.command';
+import {
+  ReleaseLockCommand,
+  TryAcquireLockCommand,
+} from './application/commands/lock.command';
 
+/** ----- Handle redis lock operations ----- **/
 @Injectable()
-export class RedisLockService implements OnModuleDestroy {
+export class RedisLockService {
   private readonly log = new Logger(RedisLockService.name);
-  private readonly client: Redis;
 
-  constructor(private readonly config: ConfigService) {
-    this.client = new Redis({
-      host: this.config.get<string>('BULLMQ_REDIS_HOST') ?? 'localhost',
-      port: Number(this.config.get<string>('BULLMQ_REDIS_PORT') ?? 6379),
-      password: this.config.get<string>('BULLMQ_REDIS_PASSWORD') || undefined,
-      maxRetriesPerRequest: 1,
-      enableReadyCheck: true,
-    });
-  }
+  /** ----- Handle constructor dependency wiring ----- **/
+  constructor(private readonly commandBus: CommandBus) {}
 
-  async onModuleDestroy(): Promise<void> {
-    await this.client.quit();
-  }
-
+  /** ----- Try acquire distributed lock ----- **/
   async tryAcquire(key: string, ttlMs: number): Promise<LockHandle | null> {
-    const token = randomUUID();
-    const result = await this.client.set(key, token, 'PX', ttlMs, 'NX');
-    if (result !== 'OK') return null;
-    return { key, token };
+    return this.commandBus
+      .execute<
+        TryAcquireLockCommand,
+        LockHandle | null
+      >(new TryAcquireLockCommand(key, ttlMs))
+      .catch((error: unknown) => {
+        const normalized = toError(error, 'Lock acquire failed');
+        this.log.error(`Failed to acquire lock: ${key}`);
+        this.log.error(normalized.stack ?? normalized.message);
+        throw normalized;
+      });
   }
 
+  /** ----- Release distributed lock ----- **/
   async release(lock: LockHandle): Promise<void> {
-    const script = `
-      if redis.call("get", KEYS[1]) == ARGV[1] then
-        return redis.call("del", KEYS[1])
-      else
-        return 0
-      end
-    `;
-
-    try {
-      await this.client.eval(script, 1, lock.key, lock.token);
-    } catch (err) {
-      this.log.warn(`Failed to release lock: ${lock.key}`);
-      this.log.warn(err instanceof Error ? err.message : String(err));
-    }
+    await this.commandBus
+      .execute(new ReleaseLockCommand(lock))
+      .catch((error: unknown) => {
+        const normalized = toError(error, 'Lock release failed');
+        this.log.error(`Failed to release lock: ${lock.key}`);
+        this.log.error(normalized.stack ?? normalized.message);
+        throw normalized;
+      });
   }
 }
