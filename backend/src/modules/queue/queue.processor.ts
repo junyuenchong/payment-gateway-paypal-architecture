@@ -31,6 +31,23 @@ type AnyJobData =
   | ReconcileOrdersSweepJob
   | MockCaptureSuccessJob;
 
+type CommandFactory = (data: AnyJobData) => object;
+
+const COMMAND_BY_JOB: Record<JobName, CommandFactory> = {
+  [JOBS.CREATE_PAYMENT_INTENT]: (data) =>
+    new CreatePaymentIntentJobCommand(data as CreatePaymentIntentJob),
+  [JOBS.CAPTURE_PAYMENT]: (data) =>
+    new CapturePaymentJobCommand(data as CapturePaymentJob),
+  [JOBS.PROCESS_WEBHOOK]: (data) =>
+    new ProcessWebhookJobCommand(data as ProcessWebhookJob),
+  [JOBS.EXPIRE_ORDERS_SWEEP]: (data) =>
+    new ExpireOrdersSweepJobCommand(data as ExpireOrdersSweepJob),
+  [JOBS.RECONCILE_ORDERS_SWEEP]: (data) =>
+    new ReconcileOrdersSweepJobCommand(data as ReconcileOrdersSweepJob),
+  [JOBS.MOCK_CAPTURE_SUCCESS]: (data) =>
+    new MockCaptureSuccessJobCommand(data as MockCaptureSuccessJob),
+};
+
 /** ----- Process queue jobs. ----- **/
 @Injectable()
 @Processor(QUEUE_NAME)
@@ -42,46 +59,14 @@ export class QueueProcessor extends WorkerHost {
   }
 
   async process(job: Job<AnyJobData>): Promise<void> {
-    // Route by job name.
+    // Route queue jobs to CQRS commands.
     try {
-      switch (job.name as JobName) {
-        case JOBS.CREATE_PAYMENT_INTENT:
-          await this.commandBus.execute(
-            new CreatePaymentIntentJobCommand(
-              job.data as CreatePaymentIntentJob,
-            ),
-          );
-          return;
-        case JOBS.CAPTURE_PAYMENT:
-          await this.commandBus.execute(
-            new CapturePaymentJobCommand(job.data as CapturePaymentJob),
-          );
-          return;
-        case JOBS.PROCESS_WEBHOOK:
-          await this.commandBus.execute(
-            new ProcessWebhookJobCommand(job.data as ProcessWebhookJob),
-          );
-          return;
-        case JOBS.EXPIRE_ORDERS_SWEEP:
-          await this.commandBus.execute(
-            new ExpireOrdersSweepJobCommand(job.data as ExpireOrdersSweepJob),
-          );
-          return;
-        case JOBS.RECONCILE_ORDERS_SWEEP:
-          await this.commandBus.execute(
-            new ReconcileOrdersSweepJobCommand(
-              job.data as ReconcileOrdersSweepJob,
-            ),
-          );
-          return;
-        case JOBS.MOCK_CAPTURE_SUCCESS:
-          await this.commandBus.execute(
-            new MockCaptureSuccessJobCommand(job.data as MockCaptureSuccessJob),
-          );
-          return;
-        default:
-          throw new Error(`Unknown job name: ${job.name ?? 'undefined'}`);
+      const commandFactory = COMMAND_BY_JOB[job.name as JobName];
+      if (!commandFactory) {
+        throw new Error(`Unknown job name: ${job.name ?? 'undefined'}`);
       }
+
+      await this.commandBus.execute(commandFactory(job.data));
     } catch (error: unknown) {
       const normalized = toError(error, 'Queue processor execution failed');
       this.log.error(

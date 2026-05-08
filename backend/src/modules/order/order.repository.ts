@@ -11,7 +11,6 @@ import { PrismaService } from '../prisma/prisma.service';
 /** ----- Handle order database access. ----- **/
 @Injectable()
 export class OrderRepository {
-  /** ----- Handle constructor dependency wiring ----- **/
   constructor(private readonly prisma: PrismaService) {}
 
   /** ----- Create order record ----- **/
@@ -35,7 +34,10 @@ export class OrderRepository {
   /** ----- Lock order for payment intent ----- **/
   lockOrderForPaymentIntent(params: { orderId: string; mockEnabled: boolean }) {
     const { orderId, mockEnabled } = params;
+
+    // Begin a database transaction to securely lock the order row.
     return this.prisma.$transaction(async (tx) => {
+      // Raw SQL query to select and lock the order for update.
       const rows = (await tx.$queryRaw<
         Array<{
           id: string;
@@ -62,16 +64,20 @@ export class OrderRepository {
         approvalUrl: string | null;
       }>;
 
+      // If the order does not exist, throw 404.
       if (rows.length === 0) throw new NotFoundException('Order not found');
 
+      // Retrieve the only locked order row.
       const order = rows[0];
       const status = String(order.status);
 
+      // If the order is in a terminal (paid/refunded) state, do not proceed.
       if (
         status === OrderStatus.PAID ||
         status === OrderStatus.REFUNDED ||
         status === OrderStatus.PARTIALLY_REFUNDED
       ) {
+        // No new payment intent to enqueue—return early.
         return {
           orderId: order.id,
           status,
@@ -81,11 +87,13 @@ export class OrderRepository {
         } as const;
       }
 
+      // Check if the order is already processing and ready for checkout.
       const checkoutReady =
         status === OrderStatus.PROCESSING &&
         !!order.paypalOrderId &&
         (mockEnabled || !!order.approvalUrl);
 
+      // If ready to checkout, return with shouldEnqueue false.
       if (checkoutReady) {
         return {
           orderId: order.id,
@@ -96,6 +104,7 @@ export class OrderRepository {
         } as const;
       }
 
+      // Abort if order status is not eligible for a new payment (non-retryable state).
       if (
         status !== OrderStatus.UNPAID &&
         status !== OrderStatus.PROCESSING &&
@@ -108,11 +117,13 @@ export class OrderRepository {
         );
       }
 
+      // Update the order status to PROCESSING and clear approvalUrl before payment.
       await tx.order.update({
         where: { id: order.id },
         data: { status: OrderStatus.PROCESSING, approvalUrl: null },
       });
 
+      // Return details for downstream processing with shouldEnqueue true.
       return {
         orderId: order.id,
         status: OrderStatus.PROCESSING,
@@ -131,6 +142,7 @@ export class OrderRepository {
   /** ----- Lock order for capture ----- **/
   lockOrderForCapture(orderId: string) {
     return this.prisma.$transaction(async (tx) => {
+      // Start a transaction to lock the order row for update (avoids race conditions)
       const orderRows = (await tx.$queryRaw<
         Array<{ id: string; status: string; paypalOrderId: string | null }>
       >`
@@ -144,15 +156,20 @@ export class OrderRepository {
         paypalOrderId: string | null;
       }>;
 
+      // If we found no order row, throw not found
       if (orderRows.length === 0)
         throw new NotFoundException('Order not found');
       const order = orderRows[0];
+
+      // Cast the raw status string to a known OrderStatusCode
       const status = order.status as OrderStatusCode;
 
+      // Check that the order has a PayPal order ID before we proceed
       if (!order.paypalOrderId) {
         throw new BadRequestException('Order has no PayPal order id');
       }
 
+      // If order is already paid, do not allow re-capture; return early with message
       if (status === OrderStatus.PAID) {
         return {
           orderId: order.id,
@@ -163,15 +180,18 @@ export class OrderRepository {
         };
       }
 
+      // Cancelled orders cannot be captured, throw
       if (status === OrderStatus.CANCELLED) {
         throw new BadRequestException('Order cancelled; cannot capture');
       }
 
+      // Otherwise, update the order status to PROCESSING to indicate capture in progress
       await tx.order.update({
         where: { id: order.id },
         data: { status: OrderStatus.PROCESSING },
       });
 
+      // Return necessary info for downstream capture processing
       return {
         orderId: order.id,
         paypalOrderId: order.paypalOrderId,
@@ -187,8 +207,14 @@ export class OrderRepository {
     orderId: string;
     nextStatus: typeof OrderStatus.PAID | typeof OrderStatus.FAILED;
   }) {
+    // Transactionally update order status if not already paid
+    // Prevents redundant updates, ensures status consistency for payment
+    // Locks row using SELECT ... FOR UPDATE during transaction step
+    // Only updates to PAID or FAILED, skips if order already PAID
+    // Returns early if order is not found or already settled
     const { orderId, nextStatus } = params;
     return this.prisma.$transaction(async (tx) => {
+      // Select order row for update to ensure up-to-date status
       const orderRows = (await tx.$queryRaw<
         Array<{ id: string; status: string }>
       >`
@@ -198,9 +224,12 @@ export class OrderRepository {
         FOR UPDATE
       `) as Array<{ id: string; status: string }>;
 
+      // Return early if order not found in database
       if (orderRows.length === 0) return;
+      // Do nothing if order's status is already PAID
       if (orderRows[0].status === OrderStatus.PAID) return;
 
+      // Update order status to requested nextStatus if eligible
       await tx.order.update({
         where: { id: orderId },
         data: { status: nextStatus },
@@ -215,10 +244,12 @@ export class OrderRepository {
     eventsTake: number;
     eventsDirection: 'asc' | 'desc';
   }) {
+    // Fetch single order including filtered webhook events list
     return this.prisma.order.findUnique({
       where: { id: params.id },
       include: {
         webhookEvents: {
+          // Apply cursor-based pagination on webhookEvents for this order
           cursor: params.eventsCursor ? { id: params.eventsCursor } : undefined,
           skip: params.eventsCursor ? 1 : 0,
           orderBy: [
@@ -237,6 +268,7 @@ export class OrderRepository {
     take: number;
     direction: 'asc' | 'desc';
   }) {
+    // Return paginated list of orders using cursor-based pagination
     return this.prisma.order.findMany({
       cursor: params.cursor ? { id: params.cursor } : undefined,
       skip: params.cursor ? 1 : 0,

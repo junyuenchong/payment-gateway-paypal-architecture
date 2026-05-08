@@ -16,6 +16,7 @@ export interface ProcessWebhookJob {
 /** ----- Define empty payload for expiry sweep job. ----- **/
 export type ExpireOrdersSweepJob = Record<string, never>;
 
+/** ----- Used by mock worker to simulate capture success. ----- **/
 export interface MockCaptureSuccessJob {
   internalOrderId: string;
   paypalOrderId: string;

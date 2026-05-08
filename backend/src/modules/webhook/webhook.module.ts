@@ -1,7 +1,7 @@
 import { HttpModule } from '@nestjs/axios';
-import { Global, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
+import { CqrsModule } from '@nestjs/cqrs';
 
-import { EventBusModule } from '../event-bus/event-bus.module';
 import { IdempotencyModule } from '../idempotency/idempotency.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { WebhooksController } from './webhooks.controller';
@@ -9,9 +9,8 @@ import { WebhookRepository } from './webhook.repository';
 import { WebhookService } from './webhook.service';
 
 /** ----- Configure webhook module. ----- **/
-@Global()
 @Module({
-  imports: [HttpModule, EventBusModule, IdempotencyModule],
+  imports: [HttpModule, IdempotencyModule, CqrsModule],
   controllers: [WebhooksController],
   providers: [
     WebhookService,

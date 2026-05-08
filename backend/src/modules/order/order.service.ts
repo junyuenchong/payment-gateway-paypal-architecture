@@ -44,6 +44,7 @@ export class OrderService implements OnModuleInit {
 
   /** ----- Initialize order module jobs ----- **/
   async onModuleInit(): Promise<void> {
+    // Initialize and upsert expire orders sweep job on module init
     const normalizedEvery = normalizePositiveNumber(
       this.config.get('ORDER_EXPIRE_SWEEP_EVERY_MS') ?? 60000,
       60000,
@@ -67,13 +68,17 @@ export class OrderService implements OnModuleInit {
     currency?: string;
     externalRef?: string;
   }): Promise<{ id: string; idempotencyKey: string }> {
+    // Set currency, falling back to config or MYR default
     const currency = (
       params.currency ??
       this.config.get<string>('PAYPAL_CURRENCY') ??
       'MYR'
     ).toUpperCase();
+
+    // Generate unique idempotency key for this order
     const idempotencyKey = `order_${randomUUID()}`;
 
+    // Create order record in the database repository
     const order = await this.repository.createOrder({
       amount: params.amount,
       currency,
@@ -81,6 +86,7 @@ export class OrderService implements OnModuleInit {
       idempotencyKey,
     });
 
+    // Return new order id and idempotency key for caller
     return { id: order.id, idempotencyKey: order.idempotencyKey };
   }
 
@@ -95,11 +101,13 @@ export class OrderService implements OnModuleInit {
     approvalUrl: string | null;
     message: string;
   }> {
+    // Acquire redis lock for payment intent creation
     try {
       const lock = await this.redisLock.tryAcquire(
         `lock:order:intent:${orderId}`,
         15000,
       );
+      // If lock not acquired, another request is ongoing
       if (!lock) {
         throw new BadRequestException(
           'Payment intent request is already in progress. Please retry shortly.',
@@ -107,19 +115,24 @@ export class OrderService implements OnModuleInit {
       }
 
       try {
+        // Determine if mock payment gateway is enabled
         const mockEnabled =
           this.config.get<string>('MOCK_PAYMENT_GATEWAY') === 'true';
+        // Set provider based on whether mock is enabled
         const provider: 'PAYPAL' | 'MOCK' = mockEnabled ? 'MOCK' : 'PAYPAL';
 
+        // Lock order for payment intent processing
         const locked = await this.repository.lockOrderForPaymentIntent({
           orderId,
           mockEnabled,
         });
 
+        // Enqueue creation job if required by order logic
         if (locked.shouldEnqueue) {
           await this.queue.createPaymentIntent(locked.orderId);
         }
 
+        // Build and return result object to caller
         return {
           provider,
           orderId: locked.orderId,
@@ -131,9 +144,11 @@ export class OrderService implements OnModuleInit {
           message: 'Checkout creation scheduled.',
         };
       } finally {
+        // Always release redis lock when finished
         await this.redisLock.release(lock);
       }
     } catch (error: unknown) {
+      // Log and rethrow errors encountered during payment intent creation
       return logErrorAndThrow(
         this.log,
         error,
@@ -150,11 +165,13 @@ export class OrderService implements OnModuleInit {
     paypalOrderId: string;
     message: string;
   }> {
+    // Attempt to acquire capture lock for order id
     try {
       const lock = await this.redisLock.tryAcquire(
         `lock:order:capture:${orderId}`,
         15000,
       );
+      // If lock is not acquired, concurrent capture is ongoing
       if (!lock) {
         throw new BadRequestException(
           'Capture request is already in progress. Please retry shortly.',
@@ -162,12 +179,15 @@ export class OrderService implements OnModuleInit {
       }
 
       try {
+        // Retrieve the order by the given orderId
         const order = await this.repository.findOrderById(orderId);
         if (!order) throw new NotFoundException('Order not found');
+        // Ensure the order has an associated PayPal ID
         if (!order.paypalOrderId) {
           throw new BadRequestException('Order has no PayPal order id');
         }
 
+        // If already paid, return with paid status for order
         if (order.status === OrderStatus.PAID) {
           return {
             orderId: order.id,
@@ -177,6 +197,7 @@ export class OrderService implements OnModuleInit {
           };
         }
 
+        // Only allow capture if status is PROCESSING or FAILED
         if (
           order.status !== OrderStatus.PROCESSING &&
           order.status !== OrderStatus.FAILED
@@ -186,9 +207,11 @@ export class OrderService implements OnModuleInit {
           );
         }
 
+        // Attempt to enqueue capture payment job
         try {
           await this.queue.capturePayment(order.id);
         } catch (error: unknown) {
+          // Log warning if enqueuing capture fails
           logWarnNormalized(
             this.log,
             error,
@@ -197,6 +220,7 @@ export class OrderService implements OnModuleInit {
           );
         }
 
+        // Return response indicating capture was scheduled now
         return {
           orderId: order.id,
           status: OrderStatus.PROCESSING as OrderStatusCode,
@@ -204,9 +228,11 @@ export class OrderService implements OnModuleInit {
           message: 'Capture scheduled.',
         };
       } finally {
+        // Always release the lock after attempting scheduling
         await this.redisLock.release(lock);
       }
     } catch (error: unknown) {
+      // Log and rethrow on schedule capture payment error
       return logErrorAndThrow(
         this.log,
         error,
@@ -223,9 +249,12 @@ export class OrderService implements OnModuleInit {
     paypalOrderId: string;
     message: string;
   }> {
+    // Attempt to capture payment for the given order
     try {
+      // Lock order for capture to avoid race conditions
       const locked = await this.repository.lockOrderForCapture(orderId);
 
+      // If order should not be captured, return early
       if (!locked.shouldCapture) {
         return {
           orderId: locked.orderId,
@@ -235,9 +264,11 @@ export class OrderService implements OnModuleInit {
         };
       }
 
+      // Determine next status and result of capture attempt
       let nextStatus: typeof OrderStatus.PAID | typeof OrderStatus.FAILED;
       let captureSucceeded = false;
       try {
+        // Execute capture command via command bus
         const captured = await this.commandBus.execute<
           CaptureCheckoutOrderCommand,
           CaptureCheckoutOrderResult
@@ -245,16 +276,19 @@ export class OrderService implements OnModuleInit {
         captureSucceeded = captured.success;
         nextStatus = captured.success ? OrderStatus.PAID : OrderStatus.FAILED;
       } catch (error) {
+        // If already captured, treat as PAID; else throw error
         if (!isAlreadyCapturedError(error)) throw error;
         nextStatus = OrderStatus.PAID;
         captureSucceeded = true;
       }
 
+      // Update capture status for the order if needed
       await this.repository.updateCaptureStatusIfNeeded({
         orderId,
         nextStatus,
       });
 
+      // Return result with order and capture status details
       return {
         orderId: locked.orderId,
         status: nextStatus as OrderStatusCode,
@@ -264,6 +298,7 @@ export class OrderService implements OnModuleInit {
           : 'Payment capture failed.',
       };
     } catch (error: unknown) {
+      // Log and throw on payment capture failure
       return logErrorAndThrow(
         this.log,
         error,
@@ -280,7 +315,9 @@ export class OrderService implements OnModuleInit {
     eventsLimit: number;
     eventsDirection: 'asc' | 'desc';
   }) {
+    // Fetch one more event to determine if there's a next page
     const eventsTake = params.eventsLimit + 1;
+    // Retrieve order with associated events using repository
     const order = await this.repository.getOrderWithEvents({
       id: params.id,
       eventsCursor: params.eventsCursor,
@@ -288,8 +325,10 @@ export class OrderService implements OnModuleInit {
       eventsDirection: params.eventsDirection,
     });
 
+    // Throw error if order does not exist in DB
     if (!order) throw new NotFoundException('Order not found');
 
+    // Build and return paginated order events page response
     return buildOrderEventsPage({
       order,
       eventsLimit: params.eventsLimit,
@@ -303,13 +342,16 @@ export class OrderService implements OnModuleInit {
     limit: number;
     direction: 'asc' | 'desc';
   }) {
+    // Fetch one more order to check for next page
     const take = params.limit + 1;
+    // Retrieve a list of orders from the repository
     const orders = await this.repository.listOrders({
       cursor: params.cursor,
       take,
       direction: params.direction,
     });
 
+    // Build paginated response using list of orders
     return buildOrderListPage({
       orders,
       limit: params.limit,
@@ -318,6 +360,7 @@ export class OrderService implements OnModuleInit {
   }
 
   /** ----- Upsert expire orders sweep schedule ----- **/
+  // Set up or update order expiration sweep schedule
   async upsertExpireOrdersSweep(everyMs: number): Promise<void> {
     await this.queue.upsertExpireOrdersSweep(everyMs);
   }

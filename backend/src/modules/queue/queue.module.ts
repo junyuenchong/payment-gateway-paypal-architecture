@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
-import { Global, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { CqrsModule } from '@nestjs/cqrs';
 
 import { QUEUE_NAME } from './queue.constant';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
@@ -11,9 +12,9 @@ import { QueueService } from './queue.service';
 import { buildDefaultJobOptions } from './queue.defaults';
 
 /** ----- Configure BullMQ queue module. ----- **/
-@Global()
 @Module({
   imports: [
+    CqrsModule,
     BullModule.registerQueueAsync({
       name: QUEUE_NAME,
       imports: [ConfigModule],
@@ -34,5 +35,5 @@ import { buildDefaultJobOptions } from './queue.defaults';
   ],
   exports: [QueueService],
 })
-/** ----- Handle queu odule class ----- **/
+/** ----- Queue module wiring ----- **/
 export class QueueModule {}

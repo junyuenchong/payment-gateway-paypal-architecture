@@ -2,7 +2,6 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
-import { EventBusModule } from './modules/event-bus/event-bus.module';
 import { LocksModule } from './modules/locks/locks.module';
 import { OrderModule } from './modules/order/order.module';
 import { PaymentGatewayModule } from './modules/payment-gateway/payment-gateway.module';
@@ -30,7 +29,6 @@ import { WebhookModule } from './modules/webhook/webhook.module';
           `paymentwebhook-${config.get<string>('NODE_ENV') ?? 'dev'}`,
       }),
     }),
-    EventBusModule,
     LocksModule,
     PrismaModule,
     QueueModule,

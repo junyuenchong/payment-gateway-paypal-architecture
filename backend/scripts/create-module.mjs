@@ -152,16 +152,15 @@ function main() {
 
   writeFileSafe(
     path.join(moduleDir, `${name}.module.ts`),
-    `import { Global, Module } from '@nestjs/common';\n\n` +
-      `import { EventBusModule } from '../event-bus/event-bus.module';\n` +
+    `import { Module } from '@nestjs/common';\n` +
+      `import { CqrsModule } from '@nestjs/cqrs';\n\n` +
       `import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';\n` +
       `import { ${classBase}Controller } from './${name}.controller';\n` +
       `import { ${classBase}Repository } from './${name}.repository';\n` +
       `import { ${classBase}Service } from './${name}.service';\n\n` +
       comment(`Configure ${name} module.`) +
-      `@Global()\n` +
       `@Module({\n` +
-      `  imports: [EventBusModule],\n` +
+      `  imports: [CqrsModule],\n` +
       `  controllers: [${classBase}Controller],\n` +
       `  providers: [${classBase}Service, ${classBase}Repository, ...EventHandlers, ...CommandHandlers, ...QueryHandlers],\n` +
       `  exports: [${classBase}Service],\n` +

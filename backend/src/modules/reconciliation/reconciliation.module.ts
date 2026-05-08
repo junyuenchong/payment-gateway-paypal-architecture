@@ -1,4 +1,5 @@
-import { Global, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
+import { CqrsModule } from '@nestjs/cqrs';
 
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { ReconciliationController } from './reconciliation.controller';
@@ -7,8 +8,8 @@ import { ReconciliationService } from './reconciliation.service';
 import { ReconciliationSchedulerService } from './reconciliation.scheduler';
 
 /** ----- Configure reconciliation module. ----- **/
-@Global()
 @Module({
+  imports: [CqrsModule],
   controllers: [ReconciliationController],
   providers: [
     ReconciliationSchedulerService,

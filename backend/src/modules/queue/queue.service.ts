@@ -12,10 +12,10 @@ import type {
   ProcessWebhookJob,
 } from './queue.interface';
 
-/** ----- Handle queue job operations ----- **/
+/** ----- Queue enqueue capabilities ----- **/
 @Injectable()
 export class QueueService {
-  private readonly log = new Logger(QueueService.name);
+  private readonly logger = new Logger(QueueService.name);
 
   constructor(
     private readonly config: ConfigService,
@@ -23,7 +23,7 @@ export class QueueService {
     private readonly queue: Queue,
   ) {}
 
-  /** ----- Enqueue generic queue job ----- **/
+  /** ----- Enqueue a typed queue job ----- **/
   private enqueue(
     name: (typeof JOBS)[keyof typeof JOBS],
     data: unknown,
@@ -32,7 +32,7 @@ export class QueueService {
   ): Promise<void> {
     return enqueueQueueJob({
       queue: this.queue,
-      logger: this.log,
+      logger: this.logger,
       name,
       data,
       jobId,
@@ -40,7 +40,7 @@ export class QueueService {
     });
   }
 
-  /** ----- Enqueue create payment intent job ----- **/
+  /** ----- Enqueue create payment intent ----- **/
   async createPaymentIntent(orderId: string): Promise<void> {
     await this.enqueue(
       JOBS.CREATE_PAYMENT_INTENT,
@@ -49,7 +49,7 @@ export class QueueService {
     );
   }
 
-  /** ----- Enqueue capture payment job ----- **/
+  /** ----- Enqueue capture payment ----- **/
   async capturePayment(orderId: string): Promise<void> {
     await this.enqueue(
       JOBS.CAPTURE_PAYMENT,
@@ -58,7 +58,7 @@ export class QueueService {
     );
   }
 
-  /** ----- Enqueue process webhook job ----- **/
+  /** ----- Enqueue webhook processing ----- **/
   async processWebhook(webhookEventId: string): Promise<void> {
     await this.enqueue(
       JOBS.PROCESS_WEBHOOK,
@@ -67,7 +67,7 @@ export class QueueService {
     );
   }
 
-  /** ----- Upsert expire orders sweep job ----- **/
+  /** ----- Upsert recurring order expiry sweep ----- **/
   async upsertExpireOrdersSweep(everyMs: number): Promise<void> {
     await this.enqueue(JOBS.EXPIRE_ORDERS_SWEEP, {}, JOBS.EXPIRE_ORDERS_SWEEP, {
       repeat: { every: everyMs },
@@ -78,7 +78,7 @@ export class QueueService {
     });
   }
 
-  /** ----- Upsert reconcile orders sweep job ----- **/
+  /** ----- Upsert recurring reconciliation sweep ----- **/
   async upsertReconcileOrdersSweep(everyMs: number): Promise<void> {
     await this.enqueue(
       JOBS.RECONCILE_ORDERS_SWEEP,
@@ -94,7 +94,7 @@ export class QueueService {
     );
   }
 
-  /** ----- Enqueue mock capture success job ----- **/
+  /** ----- Enqueue delayed mock capture success ----- **/
   async scheduleMockCaptureSuccess(
     params: MockCaptureSuccessJob,
   ): Promise<void> {

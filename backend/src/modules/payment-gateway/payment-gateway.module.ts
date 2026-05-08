@@ -1,17 +1,16 @@
 import { HttpModule } from '@nestjs/axios';
-import { Global, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { CqrsModule } from '@nestjs/cqrs';
 
-import { EventBusModule } from '../event-bus/event-bus.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { PaymentGatewayController } from './payment-gateway.controller';
 import { PaymentGatewayRepository } from './payment-gateway.repository';
 import { PaymentGatewayService } from './payment-gateway.service';
 
 /** ----- Configure payment gateway module. ----- **/
-@Global()
 @Module({
-  imports: [ConfigModule, HttpModule, EventBusModule],
+  imports: [ConfigModule, HttpModule, CqrsModule],
   controllers: [PaymentGatewayController],
   providers: [
     PaymentGatewayService,
