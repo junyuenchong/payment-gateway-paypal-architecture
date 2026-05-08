@@ -12,6 +12,69 @@ Production-style payment gateway & webhook architecture built with NestJS + Next
 - Frontend payment status table for intent vs live status (for observability)
 - **No side-effect notifications** (focus is on payment status only)
 
+## Module structure conventions (keep it simple)
+
+- **Module entry**: each module exposes a `*.module.ts` as the only Nest entry point.
+- **Layer responsibility** (must follow):
+  - `Controller`: receive HTTP request.
+  - `Command`: define action/use case payload.
+  - `Handler`: execute business flow orchestration.
+  - `Service`: reusable business logic.
+  - `Repository`: database access only.
+- **CQRS registration**: if a module uses CQRS, it exports handler arrays from `cqrs/index.ts`:
+  - `CommandHandlers`
+  - `QueryHandlers` (use `never[]` when none)
+  - `EventHandlers` (use `never[]` when none)
+- **Provider wiring**: `*.module.ts` registers providers in a consistent order:
+  - module services (e.g. `QueueService`, schedulers/processors)
+  - `...EventHandlers, ...CommandHandlers, ...QueryHandlers`
+- **Comments**: prefer short, single-line JSDoc only when it adds intent.
+
+### Create a new module (one helper)
+
+Run:
+
+```bash
+cd backend
+npm run gen:module -- <module-name>
+```
+
+This generates a standard module structure with:
+
+- `*.module.ts` (Global module, CQRS wiring)
+- `*.service.ts`
+- `cqrs/index.ts` (`CommandHandlers`, `QueryHandlers`, `EventHandlers`)
+- `application/commands` + `application/handlers`
+- Divider-style comments (matches project convention)
+
+## Module separation (production)
+
+High-level rules:
+
+- **Modules**: wiring only (imports/controllers/providers/exports). No business logic.
+- **Services**: own integration/domain logic (DB/HTTP/Redis/Queue).
+- **CQRS handlers**: orchestrate one use-case; delegate to services; keep I/O details out of handlers when possible.
+- **Controllers**: transport only (HTTP). Prefer calling CQRS (`CommandBus`/`QueryBus`) for workflows.
+
+Responsibilities by module:
+
+- **`event-bus`**: CQRS wrapper (re-export `@nestjs/cqrs`).
+- **`prisma`**: Prisma client lifecycle (`connect`/`disconnect`).
+- **`locks`**: distributed locks (`RedisLockService`).
+- **`queue`**: enqueue + worker processor routing jobs to CQRS.
+- **`idempotency`**: webhook dedupe (processed marker + webhook event storage).
+- **`payment-gateway`**: gateway integration (PayPal/mock) + CQRS + optional REST endpoints.
+- **`payment`**: thin payment facade (delegates to `payment-gateway`) + CQRS.
+- **`order`**: order lifecycle + scheduling/enqueue.
+- **`webhook`**: receive/verify/store webhooks, enqueue processing, update order status safely.
+- **`reconciliation`**: periodic sweep to reconcile stuck `PROCESSING` orders against gateway status.
+
+Dependency direction:
+
+- Infra: `event-bus`, `prisma`, `locks`, `queue`
+- Integrations: `payment-gateway`
+- Domain/use-cases: `payment`, `order`, `webhook`, `reconciliation`, `idempotency`
+
 ## Quick payment flow
 
 1. Frontend creates order: `POST /orders`
@@ -102,13 +165,13 @@ EXPIRED -> PROCESSING (Pay Again retry)
 
 ### Server-side retries (BullMQ)
 
-| Flow                  | Queue / job                                               | Enqueue location                                                                      | Attempts | Backoff                  | Dedupe                           | Failed jobs kept |
-| --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------: | ------------------------ | -------------------------------- | ---------------: |
-| Create checkout       | `create-payment-intent-queue` / `create-payment-intent`   | `backend/src/modules/orders/application/handlers/create-payment-intent.handler.ts`    |        5 | exponential, 1000ms base | `jobId=create-<orderId>`         |              100 |
-| Process webhook       | `payment-webhook-process-queue` / `process-webhook-event` | `backend/src/modules/webhooks/application/handlers/receive-webhook.handler.ts`        |        5 | exponential, 1000ms base | `jobId=webhook-<webhookEventId>` |              100 |
-| Capture fallback      | `capture-payment-queue` / `capture-payment`               | `backend/src/modules/orders/application/handlers/schedule-capture-payment.handler.ts` |        5 | exponential, 1000ms base | `jobId=capture-<orderId>`        |              100 |
-| Expire processing     | `order-maintenance` / `expire-orders-sweep`               | `backend/src/modules/orders/order-expiry.scheduler.ts`                                |        3 | fixed, 1000ms            | `jobId=expire-orders-sweep`      |               50 |
-| Mock webhook delivery | `mock-payment-queue` / `mock-capture-success`             | `backend/src/modules/payments/mock-payment.scheduler.ts`                              |        3 | fixed, 1000ms            | N/A                              |               50 |
+| Flow                  | Queue / job                                               | Enqueue location                                                                     | Attempts | Backoff                  | Dedupe                           | Failed jobs kept |
+| --------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------ | -------: | ------------------------ | -------------------------------- | ---------------: |
+| Create checkout       | `create-payment-intent-queue` / `create-payment-intent`   | `backend/src/modules/order/application/handlers/create-payment-intent.handler.ts`    |        5 | exponential, 1000ms base | `jobId=create-<orderId>`         |              100 |
+| Process webhook       | `payment-webhook-process-queue` / `process-webhook-event` | `backend/src/modules/webhook/application/handlers/receive-webhook.handler.ts`        |        5 | exponential, 1000ms base | `jobId=webhook-<webhookEventId>` |              100 |
+| Capture fallback      | `capture-payment-queue` / `capture-payment`               | `backend/src/modules/order/application/handlers/schedule-capture-payment.handler.ts` |        5 | exponential, 1000ms base | `jobId=capture-<orderId>`        |              100 |
+| Expire processing     | `order-maintenance` / `expire-orders-sweep`               | `backend/src/modules/order/order-expiry.scheduler.ts`                                |        3 | fixed, 1000ms            | `jobId=expire-orders-sweep`      |               50 |
+| Mock webhook delivery | `mock-payment-queue` / `mock-capture-success`             | `backend/src/modules/payment/mock-payment.scheduler.ts`                              |        3 | fixed, 1000ms            | N/A                              |               50 |
 
 DLQ note: This project now uses a dedicated DLQ queue: `payment-dlq-queue`.
 
@@ -168,39 +231,39 @@ Suggested demo flow:
 
 #### Redis distributed lock (`SET NX + TTL`)
 
-| Flow                  | Handler                                                                               | Lock key pattern               | Purpose                                                                    |
-| --------------------- | ------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------- |
-| Create payment intent | `backend/src/modules/orders/application/handlers/create-payment-intent.handler.ts`    | `lock:order:intent:<orderId>`  | Prevent concurrent duplicate intent requests across multiple app instances |
-| Capture scheduling    | `backend/src/modules/orders/application/handlers/schedule-capture-payment.handler.ts` | `lock:order:capture:<orderId>` | Prevent duplicate capture scheduling race                                  |
-| Webhook receive       | `backend/src/modules/webhooks/application/handlers/receive-webhook.handler.ts`        | `lock:webhook:event:<eventId>` | Prevent concurrent duplicate processing for same webhook event id          |
+| Flow                  | Handler                                                                              | Lock key pattern               | Purpose                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------ | ------------------------------ | -------------------------------------------------------------------------- |
+| Create payment intent | `backend/src/modules/order/application/handlers/create-payment-intent.handler.ts`    | `lock:order:intent:<orderId>`  | Prevent concurrent duplicate intent requests across multiple app instances |
+| Capture scheduling    | `backend/src/modules/order/application/handlers/schedule-capture-payment.handler.ts` | `lock:order:capture:<orderId>` | Prevent duplicate capture scheduling race                                  |
+| Webhook receive       | `backend/src/modules/webhook/application/handlers/receive-webhook.handler.ts`        | `lock:webhook:event:<eventId>` | Prevent concurrent duplicate processing for same webhook event id          |
 
 #### DB row lock (`SELECT ... FOR UPDATE`)
 
-| Flow                      | File                                                                               | Locked row                 | Purpose                                              |
-| ------------------------- | ---------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------- |
-| Create intent state guard | `backend/src/modules/orders/application/handlers/create-payment-intent.handler.ts` | `Order` by `orderId`       | Ensure consistent status check/update before enqueue |
-| Create checkout worker    | `backend/src/modules/orders/create-payment-intent.processor.ts`                    | `Order` by `orderId`       | Avoid duplicate `paypalOrderId`/`approvalUrl` writes |
-| Capture payment           | `backend/src/modules/orders/application/handlers/capture-payment.handler.ts`       | `Order` by `orderId`       | Ensure single safe status transition during capture  |
-| Webhook processing        | `backend/src/modules/webhooks/webhook-process.service.ts`                          | `WebhookEvent` and `Order` | Ensure one webhook worker updates status at a time   |
+| Flow                      | File                                                                              | Locked row                 | Purpose                                              |
+| ------------------------- | --------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------- |
+| Create intent state guard | `backend/src/modules/order/application/handlers/create-payment-intent.handler.ts` | `Order` by `orderId`       | Ensure consistent status check/update before enqueue |
+| Create checkout worker    | `backend/src/modules/order/create-payment-intent.processor.ts`                    | `Order` by `orderId`       | Avoid duplicate `paypalOrderId`/`approvalUrl` writes |
+| Capture payment           | `backend/src/modules/order/application/handlers/capture-payment.handler.ts`       | `Order` by `orderId`       | Ensure single safe status transition during capture  |
+| Webhook processing        | `backend/src/modules/webhook/webhook-process.service.ts`                          | `WebhookEvent` and `Order` | Ensure one webhook worker updates status at a time   |
 
 #### Short note on `SERIALIZABLE` (why it’s not the default here)
 
-PostgreSQL `SERIALIZABLE` isolation can prevent write-skew / phantom-style anomalies by making concurrent transactions behave *as if* they ran one-by-one. The trade-off is higher contention and possible `serialization_failure` errors that require **application-level retries**.
+PostgreSQL `SERIALIZABLE` isolation can prevent write-skew / phantom-style anomalies by making concurrent transactions behave _as if_ they ran one-by-one. The trade-off is higher contention and possible `serialization_failure` errors that require **application-level retries**.
 
 In this project, the critical consistency requirement is “only one worker/request can advance an order’s status at a time”. Using `SELECT ... FOR UPDATE` row locks inside `prisma.$transaction` achieves that deterministically for the specific rows we care about, with simpler operational behavior than turning every transaction into `SERIALIZABLE`.
 
 ## Key files
 
-- Orders API: `backend/src/modules/orders/orders.controller.ts`
-- Create intent API handler: `backend/src/modules/orders/application/handlers/create-payment-intent.handler.ts`
-- Create intent worker: `backend/src/modules/orders/create-payment-intent.processor.ts`
-- Capture scheduler: `backend/src/modules/orders/application/handlers/schedule-capture-payment.handler.ts`
-- Capture worker/logic: `backend/src/modules/orders/capture-payment.processor.ts`, `backend/src/modules/orders/application/handlers/capture-payment.handler.ts`
-- Webhook controller: `backend/src/modules/webhooks/webhooks.controller.ts`
-- Webhook signature verifier: `backend/src/modules/webhooks/webhook-signature.service.ts`
-- Webhook worker/logic: `backend/src/modules/webhooks/webhook-process.processor.ts`, `backend/src/modules/webhooks/webhook-process.service.ts`
+- Orders API: `backend/src/modules/order/orders.controller.ts`
+- Create intent API handler: `backend/src/modules/order/application/handlers/create-payment-intent.handler.ts`
+- Create intent worker: `backend/src/modules/order/create-payment-intent.processor.ts`
+- Capture scheduler: `backend/src/modules/order/application/handlers/schedule-capture-payment.handler.ts`
+- Capture worker/logic: `backend/src/modules/order/capture-payment.processor.ts`, `backend/src/modules/order/application/handlers/capture-payment.handler.ts`
+- Webhook controller: `backend/src/modules/webhook/webhooks.controller.ts`
+- Webhook signature verifier: `backend/src/modules/webhook/webhook-signature.service.ts`
+- Webhook worker/logic: `backend/src/modules/webhook/webhook-process.processor.ts`, `backend/src/modules/webhook/webhook-process.service.ts`
 - Redis lock service: `backend/src/modules/locks/redis-lock.service.ts`
-- DLQ jobs/service: `backend/src/modules/payments/payment-dlq.jobs.ts`, `backend/src/modules/payments/payment-dlq.service.ts`
+- DLQ queue defs / service: `backend/src/modules/queue/payment-dlq.jobs.ts`, `backend/src/modules/payment/payment-dlq.service.ts`
 - Ops module/controller/service: `backend/src/modules/ops/ops.module.ts`, `backend/src/modules/ops/ops.controller.ts`, `backend/src/modules/ops/ops.service.ts`
 - Frontend checkout page: `apps/web/app/page.tsx`
 

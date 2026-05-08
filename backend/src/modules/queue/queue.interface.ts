@@ -1,0 +1,25 @@
+/** ----- Define queue job payload types. ----- **/
+export interface CreatePaymentIntentJob {
+  orderId: string;
+}
+
+/** ----- Define payload for capture payment job. ----- **/
+export interface CapturePaymentJob {
+  orderId: string;
+}
+
+/** ----- Define payload for process webhook job. ----- **/
+export interface ProcessWebhookJob {
+  webhookEventId: string;
+}
+
+/** ----- Define empty payload for expiry sweep job. ----- **/
+export type ExpireOrdersSweepJob = Record<string, never>;
+
+export interface MockCaptureSuccessJob {
+  internalOrderId: string;
+  paypalOrderId: string;
+}
+
+/** ----- Define empty payload for reconciliation sweep job. ----- **/
+export type ReconcileOrdersSweepJob = Record<string, never>;

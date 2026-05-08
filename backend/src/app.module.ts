@@ -1,17 +1,18 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { CqrsModule } from '@nestjs/cqrs';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
-import { HealthController } from './modules/health/health.controller';
+import { EventBusModule } from './modules/event-bus/event-bus.module';
 import { LocksModule } from './modules/locks/locks.module';
-import { OpsModule } from './modules/ops/ops.module';
-import { OrdersModule } from './modules/orders/orders.module';
-import { PaymentsModule } from './modules/payments/payments.module';
+import { OrderModule } from './modules/order/order.module';
+import { PaymentGatewayModule } from './modules/payment-gateway/payment-gateway.module';
+import { PaymentModule } from './modules/payment/payment.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
-import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { QueueModule } from './modules/queue/queue.module';
+import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
+import { WebhookModule } from './modules/webhook/webhook.module';
 
+/** ----- Configure root application module. ----- **/
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -24,16 +25,20 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
           port: Number(config.get<string>('BULLMQ_REDIS_PORT') ?? 6379),
           password: config.get<string>('BULLMQ_REDIS_PASSWORD') || undefined,
         },
+        prefix:
+          config.get<string>('BULLMQ_PREFIX') ??
+          `paymentwebhook-${config.get<string>('NODE_ENV') ?? 'dev'}`,
       }),
     }),
-    CqrsModule,
+    EventBusModule,
     LocksModule,
     PrismaModule,
-    PaymentsModule,
-    OrdersModule,
-    WebhooksModule,
-    OpsModule,
+    QueueModule,
+    PaymentModule,
+    PaymentGatewayModule,
+    OrderModule,
+    WebhookModule,
+    ReconciliationModule,
   ],
-  controllers: [HealthController],
 })
 export class AppModule {}
