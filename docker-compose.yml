@@ -20,7 +20,8 @@ services:
     env_file:
       - ./backend/.env
     ports:
-      - "3000:3000"
+      # If host port 3000 is taken (local Nest, etc.), set e.g. BACKEND_PORT=3010 docker compose up
+      - "${BACKEND_PORT:-3000}:3000"
     environment:
       DATABASE_URL: postgresql://payment:payment@postgres:5432/payment?schema=public
       NODE_ENV: production

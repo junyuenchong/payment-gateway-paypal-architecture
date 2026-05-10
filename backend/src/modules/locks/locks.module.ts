@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
@@ -9,7 +8,7 @@ import { RedisLockService } from './redis-lock.service';
 
 /** ----- Configure Redis distributed locks module. ----- **/
 @Module({
-  imports: [ConfigModule, CqrsModule],
+  imports: [CqrsModule],
   controllers: [LocksController],
   providers: [
     RedisLockService,

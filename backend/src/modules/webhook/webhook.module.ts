@@ -1,8 +1,11 @@
 import { HttpModule } from '@nestjs/axios';
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 
 import { IdempotencyModule } from '../idempotency/idempotency.module';
+import { LocksModule } from '../locks/locks.module';
+import { PrismaModule } from '../prisma/prisma.module';
+import { QueueModule } from '../queue/queue.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { WebhooksController } from './webhooks.controller';
 import { WebhookRepository } from './webhook.repository';
@@ -10,7 +13,14 @@ import { WebhookService } from './webhook.service';
 
 /** ----- Configure webhook module. ----- **/
 @Module({
-  imports: [HttpModule, IdempotencyModule, CqrsModule],
+  imports: [
+    HttpModule,
+    IdempotencyModule,
+    CqrsModule,
+    LocksModule,
+    PrismaModule,
+    forwardRef(() => QueueModule),
+  ],
   controllers: [WebhooksController],
   providers: [
     WebhookService,
@@ -19,5 +29,6 @@ import { WebhookService } from './webhook.service';
     ...CommandHandlers,
     ...QueryHandlers,
   ],
+  exports: [WebhookService],
 })
 export class WebhookModule {}

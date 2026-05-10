@@ -61,13 +61,21 @@ This project demonstrates how to build a resilient payment system that is:
 
 ```text
 PaymentWebhook/
-├─ backend/                  # NestJS API and workers
-│  ├─ src/modules/           # Domain and infra modules
+├─ backend/                  # NestJS API and workers (not under apps/)
+│  ├─ src/
+│  │  ├─ app.module.ts      # Root module: Config, BullMQ, feature modules
+│  │  └─ modules/            # Domain and infra modules
+│  │     └─ feature-modules.ts   # Single place to register feature Nest modules
 │  ├─ prisma/                # Prisma schema and seed
 │  └─ scripts/               # Internal generators/lint scripts
 ├─ apps/web/                 # Next.js frontend
 └─ docker-compose.yml        # Local stack (frontend, backend, postgres, redis, adminer)
 ```
+
+### Backend module registration
+
+- The root Nest application module lives at `backend/src/app.module.ts`.
+- Feature modules are imported and listed in `backend/src/modules/feature-modules.ts` as `FEATURE_MODULES`. `AppModule` spreads that array into `imports`, so you add a new domain module by importing its `*.module.ts` there and appending it to `FEATURE_MODULES` (instead of growing a long import list in `app.module.ts`).
 
 ## Core Payment Flow
 
@@ -322,6 +330,8 @@ cd backend
 npm run lint
 npm test
 ```
+
+`npm test` runs Jest against `src/**/*.spec.ts`. If there are no matching test files, Jest exits with a non-zero code. For CI you can run `npx jest --passWithNoTests` until specs are added, or add `*.spec.ts` files under `backend/src`.
 
 ### Frontend
 

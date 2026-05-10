@@ -1,22 +1,26 @@
 import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
+
+import { PaymentGatewayModule } from '../payment-gateway/payment-gateway.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { PaymentController } from './payment.controller';
 import { PaymentRepository } from './payment.repository';
 import { PaymentService } from './payment.service';
 
+const providers = [
+  PaymentService,
+  PaymentRepository,
+  ...EventHandlers,
+  ...CommandHandlers,
+  ...QueryHandlers,
+];
+
 /** ----- Configure payment module. ----- **/
 @Module({
-  imports: [CqrsModule],
+  imports: [CqrsModule, PaymentGatewayModule],
   controllers: [PaymentController],
-  providers: [
-    PaymentService,
-    PaymentRepository,
-    ...EventHandlers,
-    ...CommandHandlers,
-    ...QueryHandlers,
-  ],
+  providers,
   exports: [PaymentService],
 })
-/** ----- Handle paymen odule class ----- **/
+/** ----- Handle payment module class. ----- **/
 export class PaymentModule {}

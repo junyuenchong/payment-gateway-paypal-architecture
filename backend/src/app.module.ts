@@ -2,14 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
-import { LocksModule } from './modules/locks/locks.module';
-import { OrderModule } from './modules/order/order.module';
-import { PaymentGatewayModule } from './modules/payment-gateway/payment-gateway.module';
-import { PaymentModule } from './modules/payment/payment.module';
-import { PrismaModule } from './modules/prisma/prisma.module';
-import { QueueModule } from './modules/queue/queue.module';
-import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
-import { WebhookModule } from './modules/webhook/webhook.module';
+import { FEATURE_MODULES } from './modules/feature-modules';
 
 /** ----- Configure root application module. ----- **/
 @Module({
@@ -29,14 +22,7 @@ import { WebhookModule } from './modules/webhook/webhook.module';
           `paymentwebhook-${config.get<string>('NODE_ENV') ?? 'dev'}`,
       }),
     }),
-    LocksModule,
-    PrismaModule,
-    QueueModule,
-    PaymentModule,
-    PaymentGatewayModule,
-    OrderModule,
-    WebhookModule,
-    ReconciliationModule,
+    ...FEATURE_MODULES,
   ],
 })
 export class AppModule {}

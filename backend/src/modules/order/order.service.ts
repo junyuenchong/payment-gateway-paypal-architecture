@@ -42,24 +42,42 @@ export class OrderService implements OnModuleInit {
     private readonly commandBus: CommandBus,
   ) {}
 
+  private async withLock<T>(
+    key: string,
+    ttlMs: number,
+    busyMessage: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const lock = await this.redisLock.tryAcquire(key, ttlMs);
+    if (!lock) throw new BadRequestException(busyMessage);
+
+    try {
+      return await fn();
+    } finally {
+      await this.redisLock.release(lock);
+    }
+  }
+
+  private isMockPaymentGatewayEnabled(): boolean {
+    return this.config.get<string>('MOCK_PAYMENT_GATEWAY') === 'true';
+  }
+
   /** ----- Initialize order module jobs ----- **/
   async onModuleInit(): Promise<void> {
     // Initialize and upsert expire orders sweep job on module init
-    const normalizedEvery = normalizePositiveNumber(
+    const everyMs = normalizePositiveNumber(
       this.config.get('ORDER_EXPIRE_SWEEP_EVERY_MS') ?? 60000,
       60000,
     );
 
-    await this.upsertExpireOrdersSweep(normalizedEvery).catch(
-      (err: unknown) => {
-        logErrorNormalized(
-          this.log,
-          err,
-          'Upsert expire sweep failed',
-          'Failed to upsert expire orders sweep job',
-        );
-      },
-    );
+    await this.upsertExpireOrdersSweep(everyMs).catch((err: unknown) => {
+      logErrorNormalized(
+        this.log,
+        err,
+        'Upsert expire sweep failed',
+        'Failed to upsert expire orders sweep job',
+      );
+    });
   }
 
   /** ----- Create order record. ----- **/
@@ -103,50 +121,40 @@ export class OrderService implements OnModuleInit {
   }> {
     // Acquire redis lock for payment intent creation
     try {
-      const lock = await this.redisLock.tryAcquire(
+      return await this.withLock(
         `lock:order:intent:${orderId}`,
         15000,
+        'Payment intent request is already in progress. Please retry shortly.',
+        async () => {
+          // Determine if mock payment gateway is enabled
+          const mockEnabled = this.isMockPaymentGatewayEnabled();
+          // Set provider based on whether mock is enabled
+          const provider: 'PAYPAL' | 'MOCK' = mockEnabled ? 'MOCK' : 'PAYPAL';
+
+          // Lock order for payment intent processing
+          const locked = await this.repository.lockOrderForPaymentIntent({
+            orderId,
+            mockEnabled,
+          });
+
+          // Enqueue creation job if required by order logic
+          if (locked.shouldEnqueue) {
+            await this.queue.createPaymentIntent(locked.orderId);
+          }
+
+          // Build and return result object to caller
+          return {
+            provider,
+            orderId: locked.orderId,
+            status: locked.status,
+            mock: mockEnabled,
+            internalOrderId: locked.orderId,
+            paypalOrderId: locked.paypalOrderId,
+            approvalUrl: locked.approvalUrl,
+            message: 'Checkout creation scheduled.',
+          };
+        },
       );
-      // If lock not acquired, another request is ongoing
-      if (!lock) {
-        throw new BadRequestException(
-          'Payment intent request is already in progress. Please retry shortly.',
-        );
-      }
-
-      try {
-        // Determine if mock payment gateway is enabled
-        const mockEnabled =
-          this.config.get<string>('MOCK_PAYMENT_GATEWAY') === 'true';
-        // Set provider based on whether mock is enabled
-        const provider: 'PAYPAL' | 'MOCK' = mockEnabled ? 'MOCK' : 'PAYPAL';
-
-        // Lock order for payment intent processing
-        const locked = await this.repository.lockOrderForPaymentIntent({
-          orderId,
-          mockEnabled,
-        });
-
-        // Enqueue creation job if required by order logic
-        if (locked.shouldEnqueue) {
-          await this.queue.createPaymentIntent(locked.orderId);
-        }
-
-        // Build and return result object to caller
-        return {
-          provider,
-          orderId: locked.orderId,
-          status: locked.status,
-          mock: mockEnabled,
-          internalOrderId: locked.orderId,
-          paypalOrderId: locked.paypalOrderId,
-          approvalUrl: locked.approvalUrl,
-          message: 'Checkout creation scheduled.',
-        };
-      } finally {
-        // Always release redis lock when finished
-        await this.redisLock.release(lock);
-      }
     } catch (error: unknown) {
       // Log and rethrow errors encountered during payment intent creation
       return logErrorAndThrow(
@@ -167,70 +175,61 @@ export class OrderService implements OnModuleInit {
   }> {
     // Attempt to acquire capture lock for order id
     try {
-      const lock = await this.redisLock.tryAcquire(
+      return await this.withLock(
         `lock:order:capture:${orderId}`,
         15000,
-      );
-      // If lock is not acquired, concurrent capture is ongoing
-      if (!lock) {
-        throw new BadRequestException(
-          'Capture request is already in progress. Please retry shortly.',
-        );
-      }
+        'Capture request is already in progress. Please retry shortly.',
+        async () => {
+          // Retrieve the order by the given orderId
+          const order = await this.repository.findOrderById(orderId);
+          if (!order) throw new NotFoundException('Order not found');
+          // Ensure the order has an associated PayPal ID
+          if (!order.paypalOrderId) {
+            throw new BadRequestException('Order has no PayPal order id');
+          }
 
-      try {
-        // Retrieve the order by the given orderId
-        const order = await this.repository.findOrderById(orderId);
-        if (!order) throw new NotFoundException('Order not found');
-        // Ensure the order has an associated PayPal ID
-        if (!order.paypalOrderId) {
-          throw new BadRequestException('Order has no PayPal order id');
-        }
+          // If already paid, return with paid status for order
+          if (order.status === OrderStatus.PAID) {
+            return {
+              orderId: order.id,
+              status: OrderStatus.PAID as OrderStatusCode,
+              paypalOrderId: order.paypalOrderId,
+              message: 'Order already paid.',
+            };
+          }
 
-        // If already paid, return with paid status for order
-        if (order.status === OrderStatus.PAID) {
+          // Only allow capture if status is PROCESSING or FAILED
+          if (
+            order.status !== OrderStatus.PROCESSING &&
+            order.status !== OrderStatus.FAILED
+          ) {
+            throw new BadRequestException(
+              `Order must be FAILED or PROCESSING to capture (got: ${order.status})`,
+            );
+          }
+
+          // Attempt to enqueue capture payment job
+          try {
+            await this.queue.capturePayment(order.id);
+          } catch (error: unknown) {
+            // Log warning if enqueuing capture fails
+            logWarnNormalized(
+              this.log,
+              error,
+              'Schedule capture failed',
+              `Capture job may already exist: ${order.id}`,
+            );
+          }
+
+          // Return response indicating capture was scheduled now
           return {
             orderId: order.id,
-            status: OrderStatus.PAID as OrderStatusCode,
+            status: OrderStatus.PROCESSING as OrderStatusCode,
             paypalOrderId: order.paypalOrderId,
-            message: 'Order already paid.',
+            message: 'Capture scheduled.',
           };
-        }
-
-        // Only allow capture if status is PROCESSING or FAILED
-        if (
-          order.status !== OrderStatus.PROCESSING &&
-          order.status !== OrderStatus.FAILED
-        ) {
-          throw new BadRequestException(
-            `Order must be FAILED or PROCESSING to capture (got: ${order.status})`,
-          );
-        }
-
-        // Attempt to enqueue capture payment job
-        try {
-          await this.queue.capturePayment(order.id);
-        } catch (error: unknown) {
-          // Log warning if enqueuing capture fails
-          logWarnNormalized(
-            this.log,
-            error,
-            'Schedule capture failed',
-            `Capture job may already exist: ${order.id}`,
-          );
-        }
-
-        // Return response indicating capture was scheduled now
-        return {
-          orderId: order.id,
-          status: OrderStatus.PROCESSING as OrderStatusCode,
-          paypalOrderId: order.paypalOrderId,
-          message: 'Capture scheduled.',
-        };
-      } finally {
-        // Always release the lock after attempting scheduling
-        await this.redisLock.release(lock);
-      }
+        },
+      );
     } catch (error: unknown) {
       // Log and rethrow on schedule capture payment error
       return logErrorAndThrow(

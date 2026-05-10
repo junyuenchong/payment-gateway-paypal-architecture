@@ -1,6 +1,5 @@
 import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
@@ -8,18 +7,20 @@ import { PaymentGatewayController } from './payment-gateway.controller';
 import { PaymentGatewayRepository } from './payment-gateway.repository';
 import { PaymentGatewayService } from './payment-gateway.service';
 
+const providers = [
+  PaymentGatewayService,
+  PaymentGatewayRepository,
+  ...EventHandlers,
+  ...CommandHandlers,
+  ...QueryHandlers,
+];
+
 /** ----- Configure payment gateway module. ----- **/
 @Module({
-  imports: [ConfigModule, HttpModule, CqrsModule],
+  imports: [HttpModule, CqrsModule],
   controllers: [PaymentGatewayController],
-  providers: [
-    PaymentGatewayService,
-    PaymentGatewayRepository,
-    ...EventHandlers,
-    ...CommandHandlers,
-    ...QueryHandlers,
-  ],
+  providers,
   exports: [PaymentGatewayService],
 })
-/** ----- Handle paymen atewa odule class ----- **/
+/** ----- Handle payment gateway module class. ----- **/
 export class PaymentGatewayModule {}

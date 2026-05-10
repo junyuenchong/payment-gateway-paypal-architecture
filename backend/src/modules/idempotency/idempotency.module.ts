@@ -7,18 +7,20 @@ import { IdempotencyController } from './idempotency.controller';
 import { IdempotencyRepository } from './idempotency.repository';
 import { IdempotencyService } from './idempotency.service';
 
-/** ----- Configure webhook idempotency module. ----- **/
+const providers = [
+  IdempotencyService,
+  IdempotencyRepository,
+  ...EventHandlers,
+  ...CommandHandlers,
+  ...QueryHandlers,
+];
+
+/** ----- Configure idempotency module. ----- **/
 @Module({
-  imports: [PrismaModule, CqrsModule],
+  imports: [CqrsModule, PrismaModule],
   controllers: [IdempotencyController],
-  providers: [
-    IdempotencyService,
-    IdempotencyRepository,
-    ...EventHandlers,
-    ...CommandHandlers,
-    ...QueryHandlers,
-  ],
+  providers,
   exports: [IdempotencyService],
 })
-/** ----- Handle idempotenc odule class ----- **/
+/** ----- Handle idempotency module class. ----- **/
 export class IdempotencyModule {}
