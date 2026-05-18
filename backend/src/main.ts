@@ -1,6 +1,9 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { Logger } from '@nestjs/common';
+
+const PROJECT_NAME = process.env.PROJECT_NAME || 'App';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { rawBody: true });
@@ -9,6 +12,8 @@ async function bootstrap(): Promise<void> {
     credentials: false,
   });
   app.useGlobalFilters(new HttpExceptionFilter());
-  await app.listen(process.env.PORT ?? 3000);
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+  Logger.log(`🚀 ${PROJECT_NAME} is running on: http://localhost:${port}`);
 }
 void bootstrap();

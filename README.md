@@ -1,4 +1,4 @@
-# Payment Webhook Architecture
+# payment-gateway-paypal-architecture
 
 Production-style payment workflow demo with asynchronous processing, idempotent webhook handling, and operational recovery support.
 
