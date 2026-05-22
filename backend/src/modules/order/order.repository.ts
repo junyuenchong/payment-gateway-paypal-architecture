@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 
 import { InventoryService } from '../inventory/inventory.service';
 import { OrderStatus, type OrderStatusCode } from './order.constant';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../database/prisma/prisma.service';
 
 type CreateOrderLineItem = {
   sku: string;

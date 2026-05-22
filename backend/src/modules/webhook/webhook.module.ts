@@ -5,7 +5,6 @@ import { CqrsModule } from '@nestjs/cqrs';
 import { IdempotencyModule } from '../idempotency/idempotency.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { LocksModule } from '../locks/locks.module';
-import { PrismaModule } from '../prisma/prisma.module';
 import { QueueModule } from '../queue/queue.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { WebhooksController } from './webhooks.controller';
@@ -20,7 +19,6 @@ import { WebhookService } from './webhook.service';
     InventoryModule,
     CqrsModule,
     LocksModule,
-    PrismaModule,
     forwardRef(() => QueueModule),
   ],
   controllers: [WebhooksController],

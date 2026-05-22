@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../../config';
-import { toErrorMessage } from '../common/error.util';
+import { toErrorMessage } from '../../shared/helpers/error.util';
 import { OrderStatus, type OrderStatusCode } from '../order/order.constant';
 import { PaymentService } from '../payment/payment.service';
 import { ReconciliationRepository } from './reconciliation.repository';

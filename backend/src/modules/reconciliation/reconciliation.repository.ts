@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { InventoryService } from '../inventory/inventory.service';
 import { OrderStatus, type OrderStatusCode } from '../order/order.constant';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../database/prisma/prisma.service';
 
 /** ----- Handle reconciliation database access. ----- **/
 @Injectable()

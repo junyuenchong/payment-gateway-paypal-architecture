@@ -2,7 +2,9 @@
 
 BullMQ workers for payments, webhooks, inventory sweeps, and reconciliation.
 
-Layering: **Processor → Command → Handler → Service / Repository**
+**Layering:** `Processor` → `Command` → `Handler` → `Service` / `Repository`
+
+**DB:** `QueueRepository` injects `PrismaService` from `../../database/prisma/prisma.service`.
 
 ---
 
@@ -13,15 +15,21 @@ queue/
 ├── processors/                    # BullMQ worker + job handlers
 │   ├── queue.processor.ts         # Routes job name → CQRS command
 │   ├── *-job.handler.ts           # One handler per job type
-│   └── index.ts
+│   └── index.ts                   # Re-exports handlers for cqrs/
 ├── application/
 │   └── commands/                  # Queue job CQRS commands
 ├── cqrs/index.ts                  # Registers processor handlers
-├── queue.service.ts               # Enqueue + schedules
+├── queue.service.ts               # Enqueue + repeat schedules
 ├── queue.repository.ts
+├── queue.controller.ts            # Ops / manual triggers
 ├── queue.constant.ts
+├── queue.defaults.ts
+├── queue.helper.ts
+├── queue.interface.ts
 └── queue.module.ts
 ```
+
+BullMQ root connection: `src/integrations/bullmq/bullmq.module.ts` (`BullMqIntegrationModule`).
 
 ---
 
@@ -29,7 +37,7 @@ queue/
 
 | Layer | Role |
 | ----- | ---- |
-| `QueueController` | Internal HTTP only (health / manual triggers) |
+| `QueueController` | Ops endpoints (metrics / DLQ live elsewhere) |
 | `processors/queue.processor.ts` | Maps BullMQ job name → CQRS command |
 | `processors/*-job.handler.ts` | Executes one job use case |
 | `application/commands/` | Job payload wrappers (no business logic) |
@@ -80,4 +88,5 @@ queue/
 ## Related docs
 
 - [Payment & inventory flow](../../../docs/paymentflow.md)
+- [Config](../../config/README.md) — BullMQ / Redis env
 - [Project README](../../../README.md)

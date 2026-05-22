@@ -2,6 +2,8 @@
 
 Single source for all environment variables. Modules inject **`AppConfigService`** instead of reading `process.env` or scattered `config.get()` calls.
 
+Registered globally in `AppModule` via `AppConfigModule`. Not listed in `modules/feature-modules.ts`.
+
 ---
 
 ## Files
@@ -13,7 +15,6 @@ Single source for all environment variables. Modules inject **`AppConfigService`
 | `config.util.ts` | Parsers (`parsePositiveInt`, `parseBool`, …) |
 | `app-config.service.ts` | Injectable typed accessors |
 | `config.module.ts` | Global `@Module` — import once in `AppModule` |
-| `redis-connection.ts` | Shared Redis options for locks / BullMQ |
 | `index.ts` | Public exports |
 
 ---
@@ -38,6 +39,8 @@ export class ExampleService {
 **Bootstrap** (`main.ts`) may call `configuration()` directly before Nest starts (port, CORS).
 
 **Constants** loaded at module init (e.g. `queue.constant.ts`) use `configuration()` once.
+
+**Database URL** is read here for Prisma; runtime client is `src/database/prisma/prisma.service.ts`.
 
 ---
 
@@ -66,3 +69,11 @@ See `backend/.env.example` for variable names.
 3. Parse in `configuration.ts`
 4. Expose via getter on `AppConfigService` if needed
 5. Inject `AppConfigService` in the consuming service
+
+---
+
+## Related
+
+- [Integrations](../integrations/README.md) — Redis, BullMQ
+- [Prisma & seeder](../../prisma/README.md)
+- [Project README](../../../README.md)

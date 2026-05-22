@@ -114,7 +114,7 @@ sequenceDiagram
 }
 ```
 
-Demo SKUs (after `npm run db:seed`): `wireless-mouse`, `usb-c-cable`, `laptop-stand`.
+Demo SKUs (from `backend/prisma/seeder/product.seeder.ts`, run `npm run db:seed`): `wireless-mouse`, `usb-c-cable`, `laptop-stand`.
 
 ---
 
@@ -154,6 +154,8 @@ Demo SKUs (after `npm run db:seed`): `wireless-mouse`, `usb-c-cable`, `laptop-st
 2. **Idempotency** — if `eventId` already in `ProcessedEvent` → `200` (no-op)
 3. **Persist** `WebhookEvent` + enqueue job → **`200`** so the provider stops retrying
 
+Idempotency logic lives under `modules/webhook` (with `modules/idempotency` helpers).
+
 ### Processing (worker)
 
 Example event patterns handled:
@@ -180,7 +182,7 @@ Providers typically retry with exponential backoff until they receive `200`.
 | `reconcile-orders-sweep` | Align stuck orders with gateway status |
 | `mock-capture-success` | Mock mode auto-capture |
 
-Details: [queue module README](../backend/src/modules/queue/README.md).
+Workers live in `backend/src/modules/queue/processors/`. Details: [queue module README](../backend/src/modules/queue/README.md).
 
 ---
 
@@ -236,8 +238,9 @@ docker compose up --build
 From `backend/`:
 
 ```bash
+npm run prisma:generate
 npm run prisma:deploy
-npm run db:seed
+npm run db:seed          # prisma/seeder/main.ts
 npm run lint
 npm test
 ```

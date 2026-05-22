@@ -3,7 +3,6 @@ import { CqrsModule } from '@nestjs/cqrs';
 
 import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentModule } from '../payment/payment.module';
-import { PrismaModule } from '../prisma/prisma.module';
 import { QueueModule } from '../queue/queue.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { ReconciliationController } from './reconciliation.controller';
@@ -13,7 +12,7 @@ import { ReconciliationSchedulerService } from './reconciliation.scheduler';
 
 /** ----- Configure reconciliation module. ----- **/
 @Module({
-  imports: [CqrsModule, InventoryModule, PrismaModule, QueueModule, PaymentModule],
+  imports: [CqrsModule, InventoryModule, QueueModule, PaymentModule],
   controllers: [ReconciliationController],
   providers: [
     ReconciliationSchedulerService,

@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 
-import { PrismaModule } from '../prisma/prisma.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { IdempotencyController } from './idempotency.controller';
 import { IdempotencyRepository } from './idempotency.repository';
@@ -17,7 +16,7 @@ const providers = [
 
 /** ----- Configure idempotency module. ----- **/
 @Module({
-  imports: [CqrsModule, PrismaModule],
+  imports: [CqrsModule],
   controllers: [IdempotencyController],
   providers,
   exports: [IdempotencyService],

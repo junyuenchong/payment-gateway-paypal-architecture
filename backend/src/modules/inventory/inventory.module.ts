@@ -2,7 +2,6 @@ import { Module, forwardRef } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 
 import { LocksModule } from '../locks/locks.module';
-import { PrismaModule } from '../prisma/prisma.module';
 import { QueueModule } from '../queue/queue.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { InventoryController } from './inventory.controller';
@@ -15,7 +14,6 @@ import { InventoryService } from './inventory.service';
   imports: [
     CqrsModule,
     LocksModule,
-    PrismaModule,
     forwardRef(() => QueueModule),
   ],
   controllers: [InventoryController],

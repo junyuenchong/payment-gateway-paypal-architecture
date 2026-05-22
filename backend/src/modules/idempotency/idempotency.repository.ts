@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { PAYMENT_PROVIDER } from '../payment/payment.constant';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../database/prisma/prisma.service';
 import type { RecordWebhookParams } from './application/commands/idempotency.command';
 
 /** ----- Handle idempotency database access. ----- **/

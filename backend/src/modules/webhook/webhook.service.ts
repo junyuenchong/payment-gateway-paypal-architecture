@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 import { AppConfigService } from '../../config';
-import { toError } from '../common/error.util';
+import { toError } from '../../shared/helpers/error.util';
 import { IdempotencyService } from '../idempotency/idempotency.service';
 import { RedisLockService } from '../locks/redis-lock.service';
 import { QueueService } from '../queue/queue.service';

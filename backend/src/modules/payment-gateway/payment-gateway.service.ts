@@ -8,7 +8,7 @@ import { createHmac, randomUUID } from 'crypto';
 import { firstValueFrom } from 'rxjs';
 
 import { AppConfigService } from '../../config';
-import { logErrorAndThrow } from '../common/error.util';
+import { logErrorAndThrow } from '../../shared/helpers/error.util';
 import type { CreateCheckoutOrderInput } from '../payment/dto/payment.input';
 import {
   getPayPalAccessToken,

@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import type { JobsOptions, Queue } from 'bullmq';
 
-import { toError } from '../common/error.util';
+import { toError } from '../../shared/helpers/error.util';
 import { JOBS } from './queue.constant';
 
 /** ----- Enqueue queue job with standard logging. ----- **/

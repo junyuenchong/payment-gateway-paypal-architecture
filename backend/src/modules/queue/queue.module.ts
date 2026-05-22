@@ -4,7 +4,6 @@ import { CqrsModule } from '@nestjs/cqrs';
 
 import { AppConfigModule, AppConfigService } from '../../config';
 import { InventoryModule } from '../inventory/inventory.module';
-import { PrismaModule } from '../prisma/prisma.module';
 import { WebhookModule } from '../webhook/webhook.module';
 import { QUEUE_NAME } from './queue.constant';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
@@ -19,7 +18,6 @@ import { QueueService } from './queue.service';
   imports: [
     CqrsModule,
     forwardRef(() => InventoryModule),
-    PrismaModule,
     forwardRef(() => WebhookModule),
     BullModule.registerQueueAsync({
       name: QUEUE_NAME,

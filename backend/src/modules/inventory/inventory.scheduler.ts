@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 
 import { AppConfigService } from '../../config';
-import { toError } from '../common/error.util';
+import { toError } from '../../shared/helpers/error.util';
 import { QueueService } from '../queue/queue.service';
 
 /** ----- Schedule inventory TTL sweeps on startup. ----- **/

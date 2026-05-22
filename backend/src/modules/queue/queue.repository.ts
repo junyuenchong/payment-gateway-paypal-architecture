@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { InventoryService } from '../inventory/inventory.service';
 import { OrderStatus } from '../order/order.constant';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../database/prisma/prisma.service';
 
 /** ----- Handle queue database access. ----- **/
 @Injectable()

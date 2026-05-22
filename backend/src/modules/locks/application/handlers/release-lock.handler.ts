@@ -3,11 +3,9 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import Redis from 'ioredis';
 
-import {
-  AppConfigService,
-  createRedisConnectionOptions,
-} from '../../../../config';
-import { toErrorMessage } from '../../../common/error.util';
+import { AppConfigService } from '../../../../config';
+import { createRedisConnectionOptions } from '../../../../integrations/redis/redis-connection';
+import { toErrorMessage } from '../../../../shared/helpers/error.util';
 import { ReleaseLockCommand } from '../commands/lock.command';
 
 /** ----- Handle releas oc andler class ----- **/

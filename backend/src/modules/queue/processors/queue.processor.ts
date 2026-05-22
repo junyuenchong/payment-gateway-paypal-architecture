@@ -5,7 +5,7 @@ import type { Job } from 'bullmq';
 import { CommandBus } from '@nestjs/cqrs';
 
 import { JOBS, QUEUE_NAME, type JobName } from '../queue.constant';
-import { toError } from '../../common/error.util';
+import { toError } from '../../../shared/helpers/error.util';
 import {
   CapturePaymentJobCommand,
   CreatePaymentIntentJobCommand,

@@ -1,4 +1,4 @@
-import type { AppConfiguration } from './config.types';
+import type { AppConfiguration } from '../../config/config.types';
 
 /** ----- ioredis connection options from centralized redis config. ----- **/
 export function createRedisConnectionOptions(redis: AppConfiguration['redis']) {

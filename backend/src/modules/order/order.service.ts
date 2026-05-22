@@ -14,7 +14,7 @@ import {
   logErrorNormalized,
   logErrorAndThrow,
   logWarnNormalized,
-} from '../common/error.util';
+} from '../../shared/helpers/error.util';
 import { RedisLockService } from '../locks/redis-lock.service';
 import { QueueService } from '../queue/queue.service';
 import {

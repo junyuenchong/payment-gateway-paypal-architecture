@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
 
-import { toError } from '../common/error.util';
+import { toError } from '../../shared/helpers/error.util';
 import type { LockHandle } from './application/commands/lock.command';
 import {
   ReleaseLockCommand,

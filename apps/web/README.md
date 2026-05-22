@@ -2,7 +2,7 @@
 
 Next.js checkout UI for the PaymentWebhook demo. Creates orders with line items, starts payment, polls status, and shows payment history.
 
-**Related docs:** [Project README](../../README.md) · [Payment & inventory flow](../../docs/paymentflow.md)
+**Related docs:** [Project README](../../README.md) · [Payment & inventory flow](../../docs/paymentflow.md) · [Backend seeder](../../backend/prisma/README.md)
 
 ---
 
@@ -28,6 +28,7 @@ From repo root:
 
 ```bash
 docker compose up --build
+docker compose exec backend npm run db:seed   # if DB is empty
 ```
 
 Open **http://localhost:8080** (container maps host `8080` → app port `3000`).
@@ -95,7 +96,7 @@ What the home page (`app/page.tsx`) does:
 | 5 | Pay in popup / redirect | Gateway webhook updates status (async) |
 | 6 | Complete / cancel routes | Refresh status from API |
 
-**Demo SKUs** (must exist in DB seed):
+**Demo SKUs** (seeded via `backend/prisma/seeder/product.seeder.ts`):
 
 | Display name | `sku` |
 | ------------ | ----- |

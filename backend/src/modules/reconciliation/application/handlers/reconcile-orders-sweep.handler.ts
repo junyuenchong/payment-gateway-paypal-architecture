@@ -2,7 +2,7 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { Logger } from '@nestjs/common';
 
-import { toErrorMessage } from '../../../common/error.util';
+import { toErrorMessage } from '../../../../shared/helpers/error.util';
 import { ReconcileOrdersSweepCommand } from '../commands/reconcile-orders-sweep.command';
 import { ReconciliationService } from '../../reconciliation.service';
 

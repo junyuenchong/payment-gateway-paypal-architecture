@@ -4,10 +4,8 @@ import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { randomUUID } from 'crypto';
 import Redis from 'ioredis';
 
-import {
-  AppConfigService,
-  createRedisConnectionOptions,
-} from '../../../../config';
+import { AppConfigService } from '../../../../config';
+import { createRedisConnectionOptions } from '../../../../integrations/redis/redis-connection';
 import {
   TryAcquireLockCommand,
   type LockHandle,

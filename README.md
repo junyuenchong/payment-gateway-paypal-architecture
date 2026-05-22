@@ -2,7 +2,7 @@
 
 Production-style **payments + inventory** demo: async workers, idempotent webhooks, Amazon-style stock reservation, and operational recovery (DLQ, sweeps, metrics).
 
-**Docs:** [Payment & inventory flow](./docs/paymentflow.md) · [Frontend](./apps/web/README.md) · [All documentation](./docs/README.md) · [Inventory module](./backend/src/modules/inventory/README.md) · [Queue module](./backend/src/modules/queue/README.md)
+**Docs:** [Payment & inventory flow](./docs/paymentflow.md) · [Frontend](./apps/web/README.md) · [All documentation](./docs/README.md) · [Prisma & seeder](./backend/prisma/README.md) · [Config](./backend/src/config/README.md) · [Inventory](./backend/src/modules/inventory/README.md) · [Queue](./backend/src/modules/queue/README.md)
 
 ---
 
@@ -20,7 +20,7 @@ Production-style **payments + inventory** demo: async workers, idempotent webhoo
 - [Concurrency & idempotency](#concurrency--idempotency)
 - [Environment variables](#environment-variables)
 - [Local setup](#local-setup)
-- [Prisma](#prisma)
+- [Prisma & database](#prisma--database)
 - [Operations](#operations)
 - [Development](#development)
 
@@ -76,18 +76,36 @@ Check inventory: `GET http://localhost:3000/inventory/products`
 
 ```text
 PaymentWebhook/
-├── backend/                 # NestJS API + workers
-│   ├── src/config/          # All env settings (AppConfigService)
-│   ├── src/modules/         # Domain modules (order, payment, inventory, queue, webhook, …)
-│   └── prisma/              # Schema, migrations, seed
-├── apps/web/                # Next.js checkout UI (see apps/web/README.md)
-├── docs/                    # Flow guides (see docs/README.md)
+├── backend/
+│   ├── prisma/                    # CLI: schema, migrations, seeder/
+│   │   ├── schema.prisma
+│   │   ├── migrations/
+│   │   └── seeder/                # product + demo-order seeders
+│   ├── src/
+│   │   ├── main.ts
+│   │   ├── app.module.ts          # AppConfig + PrismaModule + BullMQ + features
+│   │   ├── config/                # AppConfigService (global env)
+│   │   ├── database/prisma/       # Nest: prisma.module, prisma.service, prisma.extension
+│   │   ├── integrations/        # redis, bullmq, mail, storage, elasticsearch
+│   │   ├── shared/                # dto/, filters/, pipes/, helpers/
+│   │   └── modules/               # Domain only (see feature-modules.ts)
+│   │       ├── order/
+│   │       ├── payment/
+│   │       ├── payment-gateway/
+│   │       ├── webhook/           # includes idempotency
+│   │       ├── inventory/
+│   │       ├── queue/             # processors/ + BullMQ jobs
+│   │       ├── locks/
+│   │       └── reconciliation/
+│   └── .env.example
+├── apps/web/                      # Next.js checkout UI
+├── docs/                          # Flow guides
 └── docker-compose.yml
 ```
 
-Register feature modules in `backend/src/modules/feature-modules.ts`.
-
-**Layering:** `Controller` → `Command` / `Query` → `Handler` → `Service` → `Repository`
+- **Infrastructure** (not in `modules/`): `config/`, `database/prisma/`, `integrations/`, root `prisma/`
+- **Feature modules:** `backend/src/modules/feature-modules.ts`
+- **Layering:** `Controller` → `Command` / `Query` → `Handler` → `Service` → `Repository`
 
 ---
 
@@ -283,6 +301,7 @@ cd ../apps/web && npm install
 cd backend
 npm run prisma:generate
 npm run prisma:migrate
+npm run db:seed
 npm run start:dev
 
 # 4. Frontend
@@ -294,7 +313,12 @@ Align `NEXT_PUBLIC_API_BASE_URL` with the backend port.
 
 ---
 
-## Prisma
+## Prisma & database
+
+| Location | Purpose |
+| -------- | ------- |
+| `backend/prisma/` | Schema, migrations, **`seeder/`** (CLI) |
+| `backend/src/database/prisma/` | Nest `PrismaModule` / `PrismaService` (runtime) |
 
 Run inside `backend/`:
 
@@ -302,8 +326,12 @@ Run inside `backend/`:
 npm run prisma:generate   # after schema change
 npm run prisma:migrate    # dev migration
 npm run prisma:deploy     # production apply
-npm run db:seed           # demo products + order
+npm run db:seed           # runs prisma/seeder/main.ts
 ```
+
+Details: [backend/prisma/README.md](./backend/prisma/README.md)
+
+Repositories import `PrismaService` from `../../database/prisma/prisma.service` (no barrel `index.ts`).
 
 ---
 

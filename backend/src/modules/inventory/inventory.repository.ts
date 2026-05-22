@@ -8,7 +8,7 @@ import {
   buildReservationKey,
   sortSkusForLock,
 } from './inventory.constant';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../database/prisma/prisma.service';
 
 type Tx = Prisma.TransactionClient;
 

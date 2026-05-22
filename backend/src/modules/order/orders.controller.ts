@@ -3,8 +3,8 @@ import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import {
   CursorPaginationQueryDtoSchema,
   type CursorPaginationQueryDto,
-} from '../../common/dto/cursor-pagination-query.dto';
-import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+} from '../../shared/dto/cursor-pagination-query.dto';
+import { ZodValidationPipe } from '../../shared/pipes/zod-validation.pipe';
 import { ScheduleCapturePaymentCommand } from './application/commands/schedule-capture-payment.command';
 import { CreateOrderCommand } from './application/commands/create-order.command';
 import { CreatePaymentIntentCommand } from './application/commands/create-payment-intent.command';

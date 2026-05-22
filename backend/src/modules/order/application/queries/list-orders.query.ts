@@ -1,7 +1,7 @@
 import type {
   CursorDirection,
   CursorPaginationQueryDto,
-} from '../../../../common/dto/cursor-pagination-query.dto';
+} from '../../../../shared/dto/cursor-pagination-query.dto';
 
 export type ListOrdersDirection = CursorDirection;
 
