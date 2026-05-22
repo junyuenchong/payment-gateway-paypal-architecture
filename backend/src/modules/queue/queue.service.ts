@@ -1,6 +1,6 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../../config';
 import type { JobsOptions, Queue } from 'bullmq';
 
 import { JOBS, QUEUE_NAME } from './queue.constant';
@@ -18,7 +18,7 @@ export class QueueService {
   private readonly logger = new Logger(QueueService.name);
 
   constructor(
-    private readonly config: ConfigService,
+    private readonly cfg: AppConfigService,
     @InjectQueue(QUEUE_NAME)
     private readonly queue: Queue,
   ) {}
@@ -78,6 +78,38 @@ export class QueueService {
     });
   }
 
+  /** ----- Upsert recurring reservation TTL sweep ----- **/
+  async upsertExpireReservationsSweep(everyMs: number): Promise<void> {
+    await this.enqueue(
+      JOBS.EXPIRE_RESERVATIONS_SWEEP,
+      {},
+      JOBS.EXPIRE_RESERVATIONS_SWEEP,
+      {
+        repeat: { every: everyMs },
+        attempts: 3,
+        backoff: { type: 'fixed', delay: 1000 },
+        removeOnComplete: true,
+        removeOnFail: 50,
+      },
+    );
+  }
+
+  /** ----- Upsert recurring UNPAID order cleanup sweep ----- **/
+  async upsertExpireUnpaidOrdersSweep(everyMs: number): Promise<void> {
+    await this.enqueue(
+      JOBS.EXPIRE_UNPAID_ORDERS_SWEEP,
+      {},
+      JOBS.EXPIRE_UNPAID_ORDERS_SWEEP,
+      {
+        repeat: { every: everyMs },
+        attempts: 3,
+        backoff: { type: 'fixed', delay: 1000 },
+        removeOnComplete: true,
+        removeOnFail: 50,
+      },
+    );
+  }
+
   /** ----- Upsert recurring reconciliation sweep ----- **/
   async upsertReconcileOrdersSweep(everyMs: number): Promise<void> {
     await this.enqueue(
@@ -98,8 +130,7 @@ export class QueueService {
   async scheduleMockCaptureSuccess(
     params: MockCaptureSuccessJob,
   ): Promise<void> {
-    const delay = Number(this.config.get('MOCK_CAPTURE_DELAY_MS') ?? 2500);
-    const normalizedDelay = Number.isFinite(delay) ? delay : 2500;
+    const normalizedDelay = this.cfg.mock.captureDelayMs;
 
     await this.enqueue(
       JOBS.MOCK_CAPTURE_SUCCESS,

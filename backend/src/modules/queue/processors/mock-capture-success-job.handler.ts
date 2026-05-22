@@ -1,8 +1,8 @@
 /** ----- Handle mock capture success job.handler ----- **/
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 
-import { PaymentService } from '../../../payment/payment.service';
-import { MockCaptureSuccessJobCommand } from '../commands/queue-jobs.command';
+import { PaymentService } from '../../payment/payment.service';
+import { MockCaptureSuccessJobCommand } from '../application/commands/queue-jobs.command';
 
 /** ----- Handle moc aptur ucces o andler class ----- **/
 @CommandHandler(MockCaptureSuccessJobCommand)

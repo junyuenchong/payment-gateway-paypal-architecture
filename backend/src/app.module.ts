@@ -1,25 +1,23 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
 
+import { AppConfigModule, AppConfigService } from './config';
 import { FEATURE_MODULES } from './modules/feature-modules';
 
 /** ----- Configure root application module. ----- **/
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    AppConfigModule,
     BullModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
+      imports: [AppConfigModule],
+      inject: [AppConfigService],
+      useFactory: (cfg: AppConfigService) => ({
         connection: {
-          host: config.get<string>('BULLMQ_REDIS_HOST') ?? 'localhost',
-          port: Number(config.get<string>('BULLMQ_REDIS_PORT') ?? 6379),
-          password: config.get<string>('BULLMQ_REDIS_PASSWORD') || undefined,
+          host: cfg.redis.host,
+          port: cfg.redis.port,
+          password: cfg.redis.password,
         },
-        prefix:
-          config.get<string>('BULLMQ_PREFIX') ??
-          `paymentwebhook-${config.get<string>('NODE_ENV') ?? 'dev'}`,
+        prefix: cfg.redis.prefix,
       }),
     }),
     ...FEATURE_MODULES,

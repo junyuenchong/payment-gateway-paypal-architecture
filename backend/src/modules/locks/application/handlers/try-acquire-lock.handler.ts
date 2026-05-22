@@ -1,10 +1,13 @@
 /** ----- Handle try acquire lock.handler ----- **/
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
-import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import Redis from 'ioredis';
 
+import {
+  AppConfigService,
+  createRedisConnectionOptions,
+} from '../../../../config';
 import {
   TryAcquireLockCommand,
   type LockHandle,
@@ -21,11 +24,9 @@ export class TryAcquireLockHandler
   private readonly client: Redis;
 
   /** ----- Handle constructor dependency wiring ----- **/
-  constructor(private readonly config: ConfigService) {
+  constructor(cfg: AppConfigService) {
     this.client = new Redis({
-      host: this.config.get<string>('BULLMQ_REDIS_HOST') ?? 'localhost',
-      port: Number(this.config.get<string>('BULLMQ_REDIS_PORT') ?? 6379),
-      password: this.config.get<string>('BULLMQ_REDIS_PASSWORD') || undefined,
+      ...createRedisConnectionOptions(cfg.redis),
       maxRetriesPerRequest: 1,
       enableReadyCheck: true,
     });

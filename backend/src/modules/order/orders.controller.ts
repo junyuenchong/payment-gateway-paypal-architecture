@@ -31,7 +31,12 @@ export class OrdersController {
     @Body(new ZodValidationPipe(CreateOrderInputSchema)) dto: CreateOrderInput,
   ) {
     return this.commandBus.execute(
-      new CreateOrderCommand(dto.amount, dto.currency, dto.externalRef),
+      new CreateOrderCommand(
+        dto.amount,
+        dto.currency,
+        dto.externalRef,
+        dto.items,
+      ),
     );
   }
 

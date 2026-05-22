@@ -1,3 +1,4 @@
+import { InventoryModule } from './inventory/inventory.module';
 import { LocksModule } from './locks/locks.module';
 import { OrderModule } from './order/order.module';
 import { PaymentGatewayModule } from './payment-gateway/payment-gateway.module';
@@ -11,6 +12,7 @@ import { WebhookModule } from './webhook/webhook.module';
 export const FEATURE_MODULES = [
   LocksModule,
   PrismaModule,
+  InventoryModule,
   QueueModule,
   PaymentModule,
   PaymentGatewayModule,

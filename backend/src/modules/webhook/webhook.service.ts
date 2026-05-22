@@ -1,8 +1,8 @@
 import { HttpService } from '@nestjs/axios';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
+import { AppConfigService } from '../../config';
 import { toError } from '../common/error.util';
 import { IdempotencyService } from '../idempotency/idempotency.service';
 import { RedisLockService } from '../locks/redis-lock.service';
@@ -22,7 +22,7 @@ export class WebhookService {
   private readonly log = new Logger(WebhookService.name);
 
   constructor(
-    private readonly config: ConfigService,
+    private readonly cfg: AppConfigService,
     private readonly http: HttpService,
     private readonly idempotency: IdempotencyService,
     private readonly queue: QueueService,
@@ -42,7 +42,7 @@ export class WebhookService {
       }
 
       await assertValidWebhookSignature({
-        config: this.config,
+        cfg: this.cfg,
         http: this.http,
         rawBody,
         mockSignatureHeader: params.headers.mockSig,

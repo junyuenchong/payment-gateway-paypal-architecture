@@ -1,13 +1,17 @@
 import { Injectable } from '@nestjs/common';
 
-import { PrismaService } from '../prisma/prisma.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { OrderStatus } from '../order/order.constant';
+import { PrismaService } from '../prisma/prisma.service';
 
 /** ----- Handle queue database access. ----- **/
 @Injectable()
 export class QueueRepository {
   /** ----- Handle constructor dependency wiring ----- **/
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventory: InventoryService,
+  ) {}
 
   /** ----- Lock order for payment intent ----- **/
   lockOrderForPaymentIntent(orderId: string, mockEnabled: boolean) {
@@ -123,18 +127,45 @@ export class QueueRepository {
     });
   }
 
-  /** ----- Expire stale processing orders ----- **/
-  expireProcessingOrders(cutoff: Date) {
-    return this.prisma.order.updateMany({
+  /** ----- Expire stale processing orders and release stock ----- **/
+  async expireProcessingOrders(cutoff: Date) {
+    const stale = await this.prisma.order.findMany({
       where: {
         status: OrderStatus.PROCESSING,
         updatedAt: { lt: cutoff },
       },
-      data: {
-        status: OrderStatus.EXPIRED,
-        paypalOrderId: null,
-        approvalUrl: null,
-      },
+      select: { id: true },
     });
+
+    if (stale.length === 0) {
+      return { count: 0 };
+    }
+
+    for (const order of stale) {
+      await this.prisma.$transaction(async (tx) => {
+        const rows = (await tx.$queryRaw<Array<{ id: string; status: string }>>`
+          SELECT id, status::text as status
+          FROM "Order"
+          WHERE id = ${order.id}
+          FOR UPDATE
+        `) as Array<{ id: string; status: string }>;
+
+        if (rows.length === 0) return;
+        if (rows[0].status !== OrderStatus.PROCESSING) return;
+
+        await this.inventory.releaseForOrder(order.id, tx);
+
+        await tx.order.update({
+          where: { id: order.id },
+          data: {
+            status: OrderStatus.EXPIRED,
+            paypalOrderId: null,
+            approvalUrl: null,
+          },
+        });
+      });
+    }
+
+    return { count: stale.length };
   }
 }

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { InventoryService } from '../inventory/inventory.service';
 import { OrderStatus, type OrderStatusCode } from '../order/order.constant';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -7,7 +8,10 @@ import { PrismaService } from '../prisma/prisma.service';
 @Injectable()
 export class ReconciliationRepository {
   /** ----- Handle constructor dependency wiring ----- **/
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventory: InventoryService,
+  ) {}
 
   findProcessingCandidates(params: { cutoff: Date; take: number }) {
     const { cutoff, take } = params;
@@ -37,6 +41,12 @@ export class ReconciliationRepository {
 
       if (rows.length === 0) return false;
       if (rows[0].status !== OrderStatus.PROCESSING) return false;
+
+      if (next === OrderStatus.PAID) {
+        await this.inventory.commitForOrder(orderId, tx);
+      } else if (next === OrderStatus.CANCELLED) {
+        await this.inventory.releaseForOrder(orderId, tx);
+      }
 
       await tx.order.update({
         where: { id: orderId },

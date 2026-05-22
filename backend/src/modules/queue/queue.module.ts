@@ -1,15 +1,16 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module, forwardRef } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 
+import { AppConfigModule, AppConfigService } from '../../config';
+import { InventoryModule } from '../inventory/inventory.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { WebhookModule } from '../webhook/webhook.module';
 import { QUEUE_NAME } from './queue.constant';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { QueueController } from './queue.controller';
 import { buildDefaultJobOptions } from './queue.defaults';
-import { QueueProcessor } from './queue.processor';
+import { QueueProcessor } from './processors';
 import { QueueRepository } from './queue.repository';
 import { QueueService } from './queue.service';
 
@@ -17,14 +18,15 @@ import { QueueService } from './queue.service';
 @Module({
   imports: [
     CqrsModule,
+    forwardRef(() => InventoryModule),
     PrismaModule,
     forwardRef(() => WebhookModule),
     BullModule.registerQueueAsync({
       name: QUEUE_NAME,
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        defaultJobOptions: buildDefaultJobOptions(config),
+      imports: [AppConfigModule],
+      inject: [AppConfigService],
+      useFactory: (cfg: AppConfigService) => ({
+        defaultJobOptions: buildDefaultJobOptions(cfg),
       }),
     }),
   ],

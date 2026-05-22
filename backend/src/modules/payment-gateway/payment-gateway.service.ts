@@ -4,10 +4,10 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { createHmac, randomUUID } from 'crypto';
 import { firstValueFrom } from 'rxjs';
 
+import { AppConfigService } from '../../config';
 import { logErrorAndThrow } from '../common/error.util';
 import type { CreateCheckoutOrderInput } from '../payment/dto/payment.input';
 import {
@@ -28,7 +28,7 @@ export class PaymentGatewayService {
   /** ----- Handle constructor dependency wiring ----- **/
   constructor(
     private readonly http: HttpService,
-    private readonly config: ConfigService,
+    private readonly cfg: AppConfigService,
   ) {}
 
   /** ----- Create gateway checkout order. ----- **/
@@ -96,12 +96,9 @@ export class PaymentGatewayService {
   private async createCheckoutOrderInternal(
     params: CreateCheckoutOrderInput,
   ): Promise<CreateCheckoutOrderResultDto> {
-    // Create checkout order with PayPal API call
-    const base = this.config.getOrThrow<string>('PAYPAL_API_BASE');
-    const token = await getPayPalAccessToken(this.http, this.config);
-    // Determine frontend base URL for redirect links
-    const frontendBaseUrl =
-      this.config.get<string>('FRONTEND_BASE_URL') ?? 'http://localhost:8080';
+    const { apiBase } = this.cfg.paypal;
+    const token = await getPayPalAccessToken(this.http, this.cfg.paypal);
+    const frontendBaseUrl = this.cfg.app.frontendBaseUrl;
     // Construct PayPal return and cancel URLs
     const returnUrl = `${frontendBaseUrl}/paypal/complete?orderId=${params.internalOrderId}`;
     const cancelUrl = `${frontendBaseUrl}/paypal/cancelled?orderId=${params.internalOrderId}`;
@@ -113,7 +110,7 @@ export class PaymentGatewayService {
           id: string;
           links?: Array<{ href: string; rel: string }>;
         }>(
-          `${base}/v2/checkout/orders`,
+          `${apiBase}/v2/checkout/orders`,
           {
             intent: 'CAPTURE',
             purchase_units: [
@@ -146,7 +143,7 @@ export class PaymentGatewayService {
       );
 
       // Log debug info for approval links in non-production
-      if (this.config.get<string>('NODE_ENV') !== 'production') {
+      if (!this.cfg.isProduction) {
         const linkRels = data.links?.map((link) => link.rel) ?? [];
         this.logger.debug(
           `PayPal order ${data.id} links rels: ${linkRels.join(', ')}`,
@@ -177,14 +174,13 @@ export class PaymentGatewayService {
     paypalOrderId: string,
   ): Promise<CaptureCheckoutOrderResultDto> {
     // Attempt to capture PayPal checkout order here
-    const base = this.config.getOrThrow<string>('PAYPAL_API_BASE');
-    const token = await getPayPalAccessToken(this.http, this.config);
+    const token = await getPayPalAccessToken(this.http, this.cfg.paypal);
 
     try {
       // Send capture POST request to PayPal API endpoint
       const { data } = await firstValueFrom(
         this.http.post<{ status?: string }>(
-          `${base}/v2/checkout/orders/${paypalOrderId}/capture`,
+          `${this.cfg.paypal.apiBase}/v2/checkout/orders/${paypalOrderId}/capture`,
           {},
           {
             headers: {
@@ -208,7 +204,7 @@ export class PaymentGatewayService {
     paypalOrderId: string,
   ): Promise<GatewayCheckoutOrderStatusResultDto> {
     // Check if mock payment gateway is enabled in config
-    const useMock = this.config.get<string>('MOCK_PAYMENT_GATEWAY') === 'true';
+    const useMock = this.cfg.isMockPaymentGateway;
     if (useMock) {
       // If order id starts with MOCK-ORDER- return COMPLETED
       if (String(paypalOrderId).startsWith('MOCK-ORDER-')) {
@@ -219,14 +215,13 @@ export class PaymentGatewayService {
     }
 
     // Get PayPal API configuration and authorization token
-    const base = this.config.getOrThrow<string>('PAYPAL_API_BASE');
-    const token = await getPayPalAccessToken(this.http, this.config);
+    const token = await getPayPalAccessToken(this.http, this.cfg.paypal);
 
     try {
       // Fetch PayPal order status from gateway endpoint
       const { data } = await firstValueFrom(
         this.http.get<{ status?: string }>(
-          `${base}/v2/checkout/orders/${paypalOrderId}`,
+          `${this.cfg.paypal.apiBase}/v2/checkout/orders/${paypalOrderId}`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -251,8 +246,8 @@ export class PaymentGatewayService {
   }): Promise<void> {
     // Send mock payment succeeded event to webhook endpoint
     const eventType = 'MOCK.PAYMENT.SUCCEEDED';
-    const base = this.config.getOrThrow<string>('APP_BASE_URL');
-    const secret = this.config.getOrThrow<string>('MOCK_WEBHOOK_SECRET');
+    const base = this.cfg.app.baseUrl;
+    const secret = this.cfg.mock.webhookSecret;
 
     // Generate unique mock event id and prepare payload object
     const eventId = `mock-${randomUUID()}`;

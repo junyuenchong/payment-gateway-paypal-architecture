@@ -1,12 +1,13 @@
 import { HttpService } from '@nestjs/axios';
 import { BadRequestException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { firstValueFrom } from 'rxjs';
 
+import type { AppConfigService } from '../../config';
+
 /** ----- Verify webhook signature. ----- **/
 export async function assertValidWebhookSignature(params: {
-  config: ConfigService;
+  cfg: AppConfigService;
   http: HttpService;
   rawBody: Buffer;
   mockSignatureHeader: string | undefined;
@@ -16,10 +17,8 @@ export async function assertValidWebhookSignature(params: {
   paypalCertUrl: string | undefined;
   paypalAuthAlgo: string | undefined;
 }): Promise<void> {
-  const useMock = params.config.get<string>('MOCK_PAYMENT_GATEWAY') === 'true';
-
-  if (useMock) {
-    const secret = params.config.getOrThrow<string>('MOCK_WEBHOOK_SECRET');
+  if (params.cfg.isMockPaymentGateway) {
+    const secret = params.cfg.mock.webhookSecret;
     const expected = `sha256=${createHmac('sha256', secret).update(params.rawBody).digest('hex')}`;
     const given = params.mockSignatureHeader ?? '';
     const a = Buffer.from(expected, 'utf8');
@@ -47,19 +46,17 @@ export async function assertValidWebhookSignature(params: {
     );
   }
 
-  const webhookId = params.config.get<string>('PAYPAL_WEBHOOK_ID');
+  const webhookId = params.cfg.paypal.webhookId;
   if (!webhookId) {
     throw new BadRequestException('PAYPAL_WEBHOOK_ID is not configured');
   }
 
-  const clientId = params.config.getOrThrow<string>('PAYPAL_CLIENT_ID');
-  const secret = params.config.getOrThrow<string>('PAYPAL_SECRET_KEY');
-  const base = params.config.getOrThrow<string>('PAYPAL_API_BASE');
-  const auth = Buffer.from(`${clientId}:${secret}`).toString('base64');
+  const { clientId, secretKey, apiBase } = params.cfg.paypal;
+  const auth = Buffer.from(`${clientId}:${secretKey}`).toString('base64');
 
   const tokenResponse = await firstValueFrom(
     params.http.post<{ access_token: string }>(
-      `${base}/v1/oauth2/token`,
+      `${apiBase}/v1/oauth2/token`,
       new URLSearchParams({ grant_type: 'client_credentials' }),
       {
         headers: {
@@ -80,7 +77,7 @@ export async function assertValidWebhookSignature(params: {
 
   const verifyResponse = await firstValueFrom(
     params.http.post<{ verification_status?: string }>(
-      `${base}/v1/notifications/verify-webhook-signature`,
+      `${apiBase}/v1/notifications/verify-webhook-signature`,
       {
         auth_algo: authAlgo,
         cert_url: certUrl,

@@ -24,3 +24,9 @@ export interface MockCaptureSuccessJob {
 
 /** ----- Define empty payload for reconciliation sweep job. ----- **/
 export type ReconcileOrdersSweepJob = Record<string, never>;
+
+/** ----- Expire ACTIVE stock reservations past TTL. ----- **/
+export type ExpireReservationsSweepJob = Record<string, never>;
+
+/** ----- Expire stale UNPAID orders without active reservation. ----- **/
+export type ExpireUnpaidOrdersSweepJob = Record<string, never>;

@@ -25,18 +25,92 @@ enum WebhookEventStatus {
   FAILED
 }
 
+enum StockReservationStatus {
+  ACTIVE
+  COMMITTED
+  RELEASED
+}
+
+enum StockMovementReason {
+  RESERVE
+  EXTEND
+  COMMIT
+  RELEASE
+  EXPIRE
+  RESTORE_REFUND
+}
+
+model Product {
+  id            String   @id @default(cuid())
+  sku           String   @unique
+  name          String
+  stock         Int
+  reservedStock Int      @default(0)
+  version       Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  ledgerEntries StockLedgerEntry[]
+}
+
+model StockLedgerEntry {
+  id            String              @id @default(cuid())
+  productId     String
+  product       Product             @relation(fields: [productId], references: [id])
+  sku           String
+  orderId       String?
+  reservationId String?
+  quantity      Int
+  stockDelta    Int
+  reservedDelta Int
+  reason        StockMovementReason
+  correlationId String?
+  createdAt     DateTime            @default(now())
+
+  @@index([sku, createdAt])
+  @@index([orderId])
+}
+
+model OrderLineItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sku       String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(12, 2)
+
+  @@index([orderId])
+}
+
+model StockReservation {
+  id             String                 @id @default(cuid())
+  orderId        String
+  order          Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sku            String
+  quantity       Int
+  status         StockReservationStatus @default(ACTIVE)
+  reservationKey String                 @unique
+  expiresAt      DateTime
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@index([orderId, status])
+  @@index([status, expiresAt])
+}
+
 model Order {
-  id             String         @id @default(cuid())
-  externalRef    String?
-  amount         Decimal        @db.Decimal(12, 2)
-  currency       String
-  status         OrderStatus    @default(UNPAID)
-  idempotencyKey String         @unique
-  paypalOrderId  String?        @unique
-  approvalUrl   String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  webhookEvents  WebhookEvent[]
+  id                String             @id @default(cuid())
+  externalRef       String?
+  amount            Decimal            @db.Decimal(12, 2)
+  currency          String
+  status            OrderStatus        @default(UNPAID)
+  idempotencyKey    String             @unique
+  paypalOrderId     String?            @unique
+  approvalUrl       String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  lineItems         OrderLineItem[]
+  stockReservations StockReservation[]
+  webhookEvents     WebhookEvent[]
 }
 
 model ProcessedEvent {

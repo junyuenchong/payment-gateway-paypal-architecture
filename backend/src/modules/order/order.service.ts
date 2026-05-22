@@ -5,10 +5,11 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import type { CreateOrderLineItem } from './application/commands/create-order.command';
 import { CommandBus } from '@nestjs/cqrs';
 import { randomUUID } from 'crypto';
 
+import { AppConfigService } from '../../config';
 import {
   logErrorNormalized,
   logErrorAndThrow,
@@ -26,7 +27,6 @@ import {
   buildOrderEventsPage,
   buildOrderListPage,
   isAlreadyCapturedError,
-  normalizePositiveNumber,
 } from './order.helper';
 
 /** ----- Handle order business service. ----- **/
@@ -37,7 +37,7 @@ export class OrderService implements OnModuleInit {
   constructor(
     private readonly repository: OrderRepository,
     private readonly queue: QueueService,
-    private readonly config: ConfigService,
+    private readonly cfg: AppConfigService,
     private readonly redisLock: RedisLockService,
     private readonly commandBus: CommandBus,
   ) {}
@@ -59,25 +59,41 @@ export class OrderService implements OnModuleInit {
   }
 
   private isMockPaymentGatewayEnabled(): boolean {
-    return this.config.get<string>('MOCK_PAYMENT_GATEWAY') === 'true';
+    return this.cfg.isMockPaymentGateway;
   }
 
   /** ----- Initialize order module jobs ----- **/
   async onModuleInit(): Promise<void> {
     // Initialize and upsert expire orders sweep job on module init
-    const everyMs = normalizePositiveNumber(
-      this.config.get('ORDER_EXPIRE_SWEEP_EVERY_MS') ?? 60000,
-      60000,
+    await this.upsertExpireOrdersSweep(this.cfg.order.expireSweepEveryMs).catch(
+      (err: unknown) => {
+        logErrorNormalized(
+          this.log,
+          err,
+          'Upsert expire sweep failed',
+          'Failed to upsert expire orders sweep job',
+        );
+      },
     );
+  }
 
-    await this.upsertExpireOrdersSweep(everyMs).catch((err: unknown) => {
-      logErrorNormalized(
-        this.log,
-        err,
-        'Upsert expire sweep failed',
-        'Failed to upsert expire orders sweep job',
+  /** ----- Validate line item total matches order amount. ----- **/
+  private validateOrderAmount(
+    amount: number,
+    items: CreateOrderLineItem[] | undefined,
+  ): void {
+    if (!items || items.length === 0) return;
+
+    const expected = Number(
+      items
+        .reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+        .toFixed(2),
+    );
+    if (Math.abs(expected - amount) > 0.001) {
+      throw new BadRequestException(
+        `Order amount ${amount} does not match line items total ${expected}`,
       );
-    });
+    }
   }
 
   /** ----- Create order record. ----- **/
@@ -85,12 +101,12 @@ export class OrderService implements OnModuleInit {
     amount: number;
     currency?: string;
     externalRef?: string;
+    items?: CreateOrderLineItem[];
   }): Promise<{ id: string; idempotencyKey: string }> {
+    this.validateOrderAmount(params.amount, params.items);
     // Set currency, falling back to config or MYR default
     const currency = (
-      params.currency ??
-      this.config.get<string>('PAYPAL_CURRENCY') ??
-      'MYR'
+      params.currency ?? this.cfg.paypal.currency
     ).toUpperCase();
 
     // Generate unique idempotency key for this order
@@ -102,6 +118,7 @@ export class OrderService implements OnModuleInit {
       currency,
       externalRef: params.externalRef,
       idempotencyKey,
+      items: params.items,
     });
 
     // Return new order id and idempotency key for caller

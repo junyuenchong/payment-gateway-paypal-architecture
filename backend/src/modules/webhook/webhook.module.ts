@@ -3,6 +3,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 
 import { IdempotencyModule } from '../idempotency/idempotency.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { LocksModule } from '../locks/locks.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { QueueModule } from '../queue/queue.module';
@@ -16,6 +17,7 @@ import { WebhookService } from './webhook.service';
   imports: [
     HttpModule,
     IdempotencyModule,
+    InventoryModule,
     CqrsModule,
     LocksModule,
     PrismaModule,

@@ -4,30 +4,36 @@ import type { Job } from 'bullmq';
 
 import { CommandBus } from '@nestjs/cqrs';
 
-import { JOBS, QUEUE_NAME, type JobName } from './queue.constant';
-import { toError } from '../common/error.util';
+import { JOBS, QUEUE_NAME, type JobName } from '../queue.constant';
+import { toError } from '../../common/error.util';
 import {
   CapturePaymentJobCommand,
   CreatePaymentIntentJobCommand,
   ExpireOrdersSweepJobCommand,
+  ExpireReservationsSweepJobCommand,
+  ExpireUnpaidOrdersSweepJobCommand,
   MockCaptureSuccessJobCommand,
   ProcessWebhookJobCommand,
   ReconcileOrdersSweepJobCommand,
-} from './application/commands/queue-jobs.command';
+} from '../application/commands/queue-jobs.command';
 import type {
   CapturePaymentJob,
   CreatePaymentIntentJob,
   ExpireOrdersSweepJob,
+  ExpireReservationsSweepJob,
+  ExpireUnpaidOrdersSweepJob,
   MockCaptureSuccessJob,
   ProcessWebhookJob,
   ReconcileOrdersSweepJob,
-} from './queue.interface';
+} from '../queue.interface';
 
 type AnyJobData =
   | CreatePaymentIntentJob
   | CapturePaymentJob
   | ProcessWebhookJob
   | ExpireOrdersSweepJob
+  | ExpireReservationsSweepJob
+  | ExpireUnpaidOrdersSweepJob
   | ReconcileOrdersSweepJob
   | MockCaptureSuccessJob;
 
@@ -42,6 +48,10 @@ const COMMAND_BY_JOB: Record<JobName, CommandFactory> = {
     new ProcessWebhookJobCommand(data as ProcessWebhookJob),
   [JOBS.EXPIRE_ORDERS_SWEEP]: (data) =>
     new ExpireOrdersSweepJobCommand(data as ExpireOrdersSweepJob),
+  [JOBS.EXPIRE_RESERVATIONS_SWEEP]: (data) =>
+    new ExpireReservationsSweepJobCommand(data as ExpireReservationsSweepJob),
+  [JOBS.EXPIRE_UNPAID_ORDERS_SWEEP]: (data) =>
+    new ExpireUnpaidOrdersSweepJobCommand(data as ExpireUnpaidOrdersSweepJob),
   [JOBS.RECONCILE_ORDERS_SWEEP]: (data) =>
     new ReconcileOrdersSweepJobCommand(data as ReconcileOrdersSweepJob),
   [JOBS.MOCK_CAPTURE_SUCCESS]: (data) =>

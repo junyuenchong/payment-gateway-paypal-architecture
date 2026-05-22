@@ -3,6 +3,8 @@ import type {
   CapturePaymentJob,
   CreatePaymentIntentJob,
   ExpireOrdersSweepJob,
+  ExpireReservationsSweepJob,
+  ExpireUnpaidOrdersSweepJob,
   MockCaptureSuccessJob,
   ProcessWebhookJob,
   ReconcileOrdersSweepJob,
@@ -42,4 +44,14 @@ export class MockCaptureSuccessJobCommand {
 export class ReconcileOrdersSweepJobCommand {
   /** ----- Handle constructor dependency wiring ----- **/
   constructor(public readonly data: ReconcileOrdersSweepJob) {}
+}
+
+/** ----- Handle expir eservatio wee o ommand class ----- **/
+export class ExpireReservationsSweepJobCommand {
+  constructor(public readonly data: ExpireReservationsSweepJob) {}
+}
+
+/** ----- Handle expir npai rder wee o ommand class ----- **/
+export class ExpireUnpaidOrdersSweepJobCommand {
+  constructor(public readonly data: ExpireUnpaidOrdersSweepJob) {}
 }

@@ -1,7 +1,7 @@
 /** ----- Handle capture payment job.handler ----- **/
 import { CommandBus, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
-import { CapturePaymentCommand } from '../../../order/application/commands/capture-payment.command';
-import { CapturePaymentJobCommand } from '../commands/queue-jobs.command';
+import { CapturePaymentCommand } from '../../order/application/commands/capture-payment.command';
+import { CapturePaymentJobCommand } from '../application/commands/queue-jobs.command';
 
 /** ----- Handle captur aymen o andler class ----- **/
 @CommandHandler(CapturePaymentJobCommand)

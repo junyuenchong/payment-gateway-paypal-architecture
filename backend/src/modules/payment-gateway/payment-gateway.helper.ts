@@ -1,22 +1,22 @@
 import { HttpService } from '@nestjs/axios';
 import { BadGatewayException, BadRequestException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { AxiosError } from 'axios';
 import { firstValueFrom } from 'rxjs';
+
+import type { AppConfiguration } from '../../config';
 
 /** ----- Get PayPal access token. ----- **/
 export async function getPayPalAccessToken(
   http: HttpService,
-  config: ConfigService,
+  paypal: AppConfiguration['paypal'],
 ): Promise<string> {
-  const id = config.getOrThrow<string>('PAYPAL_CLIENT_ID');
-  const secret = config.getOrThrow<string>('PAYPAL_SECRET_KEY');
-  const base = config.getOrThrow<string>('PAYPAL_API_BASE');
-  const auth = Buffer.from(`${id}:${secret}`).toString('base64');
+  const auth = Buffer.from(`${paypal.clientId}:${paypal.secretKey}`).toString(
+    'base64',
+  );
 
   const { data } = await firstValueFrom(
     http.post<{ access_token: string }>(
-      `${base}/v1/oauth2/token`,
+      `${paypal.apiBase}/v1/oauth2/token`,
       new URLSearchParams({ grant_type: 'client_credentials' }),
       {
         headers: {

@@ -5,13 +5,23 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
+import { InventoryService } from '../inventory/inventory.service';
 import { OrderStatus, type OrderStatusCode } from './order.constant';
 import { PrismaService } from '../prisma/prisma.service';
+
+type CreateOrderLineItem = {
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+};
 
 /** ----- Handle order database access. ----- **/
 @Injectable()
 export class OrderRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventory: InventoryService,
+  ) {}
 
   /** ----- Create order record ----- **/
   createOrder(params: {
@@ -19,15 +29,33 @@ export class OrderRepository {
     currency: string;
     externalRef?: string;
     idempotencyKey: string;
+    items?: CreateOrderLineItem[];
   }) {
-    return this.prisma.order.create({
-      data: {
-        amount: new Prisma.Decimal(params.amount),
-        currency: params.currency,
-        externalRef: params.externalRef,
-        idempotencyKey: params.idempotencyKey,
-        status: OrderStatus.UNPAID,
-      },
+    const { items, ...orderData } = params;
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.create({
+        data: {
+          amount: new Prisma.Decimal(orderData.amount),
+          currency: orderData.currency,
+          externalRef: orderData.externalRef,
+          idempotencyKey: orderData.idempotencyKey,
+          status: OrderStatus.UNPAID,
+        },
+      });
+
+      if (items && items.length > 0) {
+        await tx.orderLineItem.createMany({
+          data: items.map((item) => ({
+            orderId: order.id,
+            sku: item.sku,
+            quantity: item.quantity,
+            unitPrice: new Prisma.Decimal(item.unitPrice),
+          })),
+        });
+        await this.inventory.reserveAtCheckout(order.id, tx);
+      }
+
+      return order;
     });
   }
 
@@ -116,6 +144,8 @@ export class OrderRepository {
           'Order is not in a retryable state to start payment',
         );
       }
+
+      await this.inventory.extendForPayment(order.id, tx);
 
       // Update the order status to PROCESSING and clear approvalUrl before payment.
       await tx.order.update({
@@ -229,11 +259,21 @@ export class OrderRepository {
       // Do nothing if order's status is already PAID
       if (orderRows[0].status === OrderStatus.PAID) return;
 
-      // Update order status to requested nextStatus if eligible
+      const previousStatus = orderRows[0].status;
+
       await tx.order.update({
         where: { id: orderId },
         data: { status: nextStatus },
       });
+
+      if (nextStatus === OrderStatus.PAID) {
+        await this.inventory.commitForOrder(orderId, tx);
+      } else if (
+        nextStatus === OrderStatus.FAILED &&
+        previousStatus === OrderStatus.PROCESSING
+      ) {
+        await this.inventory.releaseForOrder(orderId, tx);
+      }
     });
   }
 
@@ -248,6 +288,7 @@ export class OrderRepository {
     return this.prisma.order.findUnique({
       where: { id: params.id },
       include: {
+        lineItems: true,
         webhookEvents: {
           // Apply cursor-based pagination on webhookEvents for this order
           cursor: params.eventsCursor ? { id: params.eventsCursor } : undefined,

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { InventoryService } from '../inventory/inventory.service';
 import { OrderStatus, type OrderStatusCode } from '../order/order.constant';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -13,7 +14,10 @@ const WebhookEventStatus = {
 @Injectable()
 export class WebhookRepository {
   /** ----- Handle constructor dependency wiring ----- **/
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventory: InventoryService,
+  ) {}
 
   /** ----- Handle fin ebhoo ven  d method ----- **/
   findWebhookEventById(id: string) {
@@ -117,6 +121,30 @@ export class WebhookRepository {
         }
       } else if (success && currentStatus === OrderStatus.PROCESSING) {
         nextStatus = OrderStatus.PAID;
+      }
+
+      const refunded =
+        eventType.includes('REFUND') ||
+        resourceStatus.toUpperCase().includes('REFUND');
+      if (
+        refunded &&
+        (currentStatus === OrderStatus.PAID ||
+          currentStatus === OrderStatus.PARTIALLY_REFUNDED)
+      ) {
+        nextStatus = OrderStatus.REFUNDED;
+      }
+
+      if (nextStatus !== currentStatus) {
+        if (nextStatus === OrderStatus.PAID) {
+          await this.inventory.commitForOrder(orderId, tx);
+        } else if (nextStatus === OrderStatus.REFUNDED) {
+          await this.inventory.restoreForRefund(orderId, tx);
+        } else if (
+          nextStatus === OrderStatus.FAILED ||
+          nextStatus === OrderStatus.CANCELLED
+        ) {
+          await this.inventory.releaseForOrder(orderId, tx);
+        }
       }
 
       await tx.order.update({

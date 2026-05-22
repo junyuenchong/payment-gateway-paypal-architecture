@@ -1,31 +1,83 @@
-# Queue Module Layering Guide
+# Queue module
 
-This module follows a CQRS-oriented layered structure for asynchronous queue processing.
+BullMQ workers for payments, webhooks, inventory sweeps, and reconciliation.
 
-## Responsibilities
+Layering: **Processor → Command → Handler → Service / Repository**
 
-- `QueueController`: receives internal HTTP endpoints only (health/manual trigger style).
-- `QueueProcessor`: receives BullMQ jobs and routes each job name to one command.
-- `Command`: carries use-case input data (`data`) without business logic.
-- `Handler`: executes the business flow for one use case.
-- `QueueService`: reusable queue capabilities (enqueue, scheduling, retry options).
-- `QueueRepository`: database-only concerns (query, lock, transaction, persistence).
+---
+
+## Structure
+
+```text
+queue/
+├── processors/                    # BullMQ worker + job handlers
+│   ├── queue.processor.ts         # Routes job name → CQRS command
+│   ├── *-job.handler.ts           # One handler per job type
+│   └── index.ts
+├── application/
+│   └── commands/                  # Queue job CQRS commands
+├── cqrs/index.ts                  # Registers processor handlers
+├── queue.service.ts               # Enqueue + schedules
+├── queue.repository.ts
+├── queue.constant.ts
+└── queue.module.ts
+```
+
+---
+
+## Layer responsibilities
+
+| Layer | Role |
+| ----- | ---- |
+| `QueueController` | Internal HTTP only (health / manual triggers) |
+| `processors/queue.processor.ts` | Maps BullMQ job name → CQRS command |
+| `processors/*-job.handler.ts` | Executes one job use case |
+| `application/commands/` | Job payload wrappers (no business logic) |
+| `QueueService` | Enqueue, repeat schedules, retry options |
+| `QueueRepository` | DB locks and persistence for jobs |
+
+---
+
+## Registered jobs
+
+| Job name | Handler | Responsibility |
+| -------- | ------- | -------------- |
+| `create-payment-intent` | `CreatePaymentIntentJobHandler` | Create PayPal / mock checkout |
+| `process-webhook` | `ProcessWebhookJobHandler` | Update order + inventory |
+| `capture-payment` | `CapturePaymentJobHandler` | Capture payment at gateway |
+| `expire-orders-sweep` | `ExpireOrdersSweepJobHandler` | `PROCESSING` → `EXPIRED`, release stock |
+| `expire-reservations-sweep` | `ExpireReservationsSweepJobHandler` | → `ExpireStaleReservationsCommand` |
+| `expire-unpaid-orders-sweep` | `ExpireUnpaidOrdersSweepJobHandler` | → `ExpireUnpaidOrdersCommand` |
+| `reconcile-orders-sweep` | `ReconcileOrdersSweepJobHandler` | Fix stuck `PROCESSING` vs gateway |
+| `mock-capture-success` | `MockCaptureSuccessJobHandler` | Simulate successful capture |
+
+**Retry defaults:** 5 attempts, exponential backoff (1s base) for payment/webhook jobs; 3 attempts, fixed 1s for sweeps.
+
+---
+
+## Add a new job
+
+1. Payload type → `queue.interface.ts`
+2. Job name → `queue.constant.ts` (`JOBS`)
+3. Command → `application/commands/queue-jobs.command.ts`
+4. Handler → `processors/<name>-job.handler.ts`
+5. Export handler → `processors/index.ts`
+6. Register in `cqrs/index.ts` (`CommandHandlers`)
+7. Map job → command in `processors/queue.processor.ts` (`COMMAND_BY_JOB`)
+8. Enqueue helper → `queue.service.ts` (if needed)
+
+---
 
 ## Rules
 
-- Keep handlers orchestration-focused: call services/repositories, avoid SQL and queue primitives.
-- Keep repository pure data access: no external HTTP/API calls.
-- Keep queue service pure queue access: no domain decisions.
-- Add a new job with this path:
-  1. Add payload type in `queue.interface.ts`.
-  2. Add job name in `queue.constant.ts`.
-  3. Add command in `application/commands/queue-jobs.command.ts`.
-  4. Add handler in `application/handlers/*`.
-  5. Register handler in `cqrs/index.ts`.
-  6. Map job -> command factory in `queue.processor.ts`.
+- Handlers in `processors/` orchestrate only — no raw SQL or BullMQ APIs.
+- Repositories own transactions and `FOR UPDATE` locks.
+- `QueueService` owns enqueue idempotency (`jobId`).
+- Inventory sweeps delegate to [inventory module](../inventory/README.md) CQRS commands.
 
-## Why this shape
+---
 
-- Improves testability (small isolated handlers/services/repositories).
-- Keeps idempotency and transaction logic explicit in repository layer.
-- Makes job routing predictable and easy to extend.
+## Related docs
+
+- [Payment & inventory flow](../../../docs/paymentflow.md)
+- [Project README](../../../README.md)

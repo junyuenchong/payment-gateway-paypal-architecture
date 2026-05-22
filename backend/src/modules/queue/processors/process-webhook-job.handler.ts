@@ -1,8 +1,8 @@
 /** ----- Handle process webhook job.handler ----- **/
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 
-import { WebhookService } from '../../../webhook/webhook.service';
-import { ProcessWebhookJobCommand } from '../commands/queue-jobs.command';
+import { WebhookService } from '../../webhook/webhook.service';
+import { ProcessWebhookJobCommand } from '../application/commands/queue-jobs.command';
 
 /** ----- Handle proces ebhoo o andler class ----- **/
 @CommandHandler(ProcessWebhookJobCommand)

@@ -21,15 +21,28 @@ import { toErrorMessage } from '../features/shared/lib/error';
  */
 type CheckoutItem = {
   id: string;
+  sku: string;
   name: string;
   qty: number;
   unitPrice: number;
 };
 
 const INITIAL_ITEMS: CheckoutItem[] = [
-  { id: 'i1', name: 'Wireless Mouse', qty: 1, unitPrice: 39.9 },
-  { id: 'i2', name: 'USB-C Cable', qty: 2, unitPrice: 12.5 },
-  { id: 'i3', name: 'Laptop Stand', qty: 1, unitPrice: 49.9 },
+  {
+    id: 'i1',
+    sku: 'wireless-mouse',
+    name: 'Wireless Mouse',
+    qty: 1,
+    unitPrice: 39.9,
+  },
+  { id: 'i2', sku: 'usb-c-cable', name: 'USB-C Cable', qty: 2, unitPrice: 12.5 },
+  {
+    id: 'i3',
+    sku: 'laptop-stand',
+    name: 'Laptop Stand',
+    qty: 1,
+    unitPrice: 49.9,
+  },
 ];
 const SUPPORTED_CURRENCIES = (
   process.env.NEXT_PUBLIC_PAYPAL_SUPPORTED_CURRENCIES ?? 'MYR'
@@ -399,6 +412,11 @@ export default function HomePage() {
         amount: totalAmount,
         currency: selectedCurrency,
         externalRef: `web-${Date.now()}`,
+        items: items.map((item) => ({
+          sku: item.sku,
+          quantity: item.qty,
+          unitPrice: item.unitPrice,
+        })),
       });
       setCreatedOrderId(order.id);
       upsertPaymentRow({

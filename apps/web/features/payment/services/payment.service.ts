@@ -32,6 +32,11 @@ export function createOrder(payload: {
   amount: number;
   currency: string;
   externalRef?: string;
+  items?: Array<{
+    sku: string;
+    quantity: number;
+    unitPrice: number;
+  }>;
 }) {
   return apiRequest<CreateOrderResponse>(
     '/orders',

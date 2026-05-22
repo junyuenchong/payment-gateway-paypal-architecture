@@ -17,6 +17,7 @@ export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
       amount: command.amount,
       currency: command.currency,
       externalRef: command.externalRef,
+      items: command.items,
     });
   }
 }

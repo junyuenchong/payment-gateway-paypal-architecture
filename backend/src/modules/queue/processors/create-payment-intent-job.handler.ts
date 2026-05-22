@@ -1,22 +1,22 @@
 /** ----- Handle create payment intent job.handler ----- **/
 import { CommandBus, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
-import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 
-import { QueueRepository } from '../../queue.repository';
-import { QueueService } from '../../queue.service';
-import { CreatePaymentIntentJobCommand } from '../commands/queue-jobs.command';
+import { AppConfigService } from '../../../config';
+import { QueueRepository } from '../queue.repository';
+import { QueueService } from '../queue.service';
+import { CreatePaymentIntentJobCommand } from '../application/commands/queue-jobs.command';
 import {
   CreateCheckoutOrderCommand,
   type CreateCheckoutOrderResult,
-} from '../../../payment/application/commands/payment-gateway.command';
+} from '../../payment/application/commands/payment-gateway.command';
 
 /** ----- Handle creat aymen nten o andler class ----- **/
 @CommandHandler(CreatePaymentIntentJobCommand)
 export class CreatePaymentIntentJobHandler implements ICommandHandler<CreatePaymentIntentJobCommand> {
   constructor(
     private readonly repository: QueueRepository,
-    private readonly config: ConfigService,
+    private readonly cfg: AppConfigService,
     private readonly queue: QueueService,
     private readonly commandBus: CommandBus,
   ) {}
@@ -24,8 +24,7 @@ export class CreatePaymentIntentJobHandler implements ICommandHandler<CreatePaym
   /** ----- Handle execute method ----- **/
   async execute(command: CreatePaymentIntentJobCommand): Promise<void> {
     const orderId = command.data.orderId;
-    const mockEnabled =
-      this.config.get<string>('MOCK_PAYMENT_GATEWAY') === 'true';
+    const mockEnabled = this.cfg.isMockPaymentGateway;
 
     // Lock & snapshot. Never call external services in a transaction.
     const snapshot = await this.repository.lockOrderForPaymentIntent(

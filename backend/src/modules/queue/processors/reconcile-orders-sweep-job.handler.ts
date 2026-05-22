@@ -1,8 +1,8 @@
 /** ----- Handle reconcile orders sweep job.handler ----- **/
 import { CommandBus, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 
-import { ReconcileOrdersSweepJobCommand } from '../commands/queue-jobs.command';
-import { ReconcileOrdersSweepCommand } from '../../../reconciliation/application/commands/reconcile-orders-sweep.command';
+import { ReconcileOrdersSweepJobCommand } from '../application/commands/queue-jobs.command';
+import { ReconcileOrdersSweepCommand } from '../../reconciliation/application/commands/reconcile-orders-sweep.command';
 
 /** ----- Handle reconcil rder wee o andler class ----- **/
 @CommandHandler(ReconcileOrdersSweepJobCommand)

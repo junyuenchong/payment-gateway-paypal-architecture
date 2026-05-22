@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-
+import { AppConfigService } from '../../config';
 import { toErrorMessage } from '../common/error.util';
 import { OrderStatus, type OrderStatusCode } from '../order/order.constant';
 import { PaymentService } from '../payment/payment.service';
@@ -15,32 +14,18 @@ export class ReconciliationService {
   private readonly log = new Logger(ReconciliationService.name);
 
   constructor(
-    private readonly config: ConfigService,
+    private readonly cfg: AppConfigService,
     private readonly repository: ReconciliationRepository,
     private readonly payment: PaymentService,
   ) {}
 
   /** ----- Reconcile PROCESSING orders with gateway status. ----- **/
   async reconcileOrdersSweep(): Promise<void> {
-    const batchSize = Number(
-      this.config.get('RECONCILIATION_BATCH_SIZE') ?? 50,
-    );
-    const normalizedBatchSize =
-      Number.isFinite(batchSize) && batchSize > 0 ? Math.floor(batchSize) : 50;
-
-    const lookbackMs = Number(
-      this.config.get('RECONCILIATION_LOOKBACK_MS') ?? 10 * 60 * 1000,
-    );
-    const normalizedLookbackMs =
-      Number.isFinite(lookbackMs) && lookbackMs > 0
-        ? Math.floor(lookbackMs)
-        : 10 * 60 * 1000;
-
-    const cutoff = new Date(Date.now() - normalizedLookbackMs);
+    const cutoff = new Date(Date.now() - this.cfg.reconciliation.lookbackMs);
 
     const candidates = await this.repository.findProcessingCandidates({
       cutoff,
-      take: normalizedBatchSize,
+      take: this.cfg.reconciliation.batchSize,
     });
 
     if (candidates.length === 0) return;
