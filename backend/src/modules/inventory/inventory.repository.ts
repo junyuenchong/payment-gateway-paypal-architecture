@@ -1,13 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
-import { OrderStatus } from '../order/order.constant';
-import {
-  StockMovementReason,
-  StockReservationStatus,
-  buildReservationKey,
-  sortSkusForLock,
-} from './inventory.constant';
+import { OrderStatus } from '../order/enums/order-status.enum';
+import { StockMovementReason } from './enums/stock-movement-reason.enum';
+import { StockReservationStatus } from './enums/stock-reservation-status.enum';
+import { buildReservationKey, sortSkusForLock } from './inventory.constant';
 import { PrismaService } from '../../database/prisma/prisma.service';
 
 type Tx = Prisma.TransactionClient;

@@ -24,7 +24,8 @@ inventory/
 ├── inventory.service.ts   # Domain + Redis SKU locks
 ├── inventory.repository.ts
 ├── inventory.scheduler.ts # Schedules sweep jobs via QueueService
-└── inventory.constant.ts
+├── enums/                 # stock-reservation-status, stock-movement-reason
+└── inventory.constant.ts  # helpers (reservation keys, SKU lock order)
 ```
 
 ---

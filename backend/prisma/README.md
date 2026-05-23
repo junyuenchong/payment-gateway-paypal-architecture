@@ -8,7 +8,7 @@ Prisma CLI assets and database seeders. Runtime Nest access is in **`src/databas
 
 | Path | Role |
 | ---- | ---- |
-| `schema.prisma` | Data model |
+| `schema.prisma` | Data model (status fields are `String`; enums in `src/modules/*/enums/`) |
 | `migrations/` | SQL migrations |
 | `seeder/` | All seed scripts |
 

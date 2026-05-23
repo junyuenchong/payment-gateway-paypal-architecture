@@ -1,14 +1,9 @@
 import { Injectable } from '@nestjs/common';
 
 import { InventoryService } from '../inventory/inventory.service';
-import { OrderStatus, type OrderStatusCode } from '../order/order.constant';
+import { OrderStatus, type OrderStatusCode } from '../order/enums/order-status.enum';
+import { WebhookEventStatus } from './enums/webhook-event-status.enum';
 import { PrismaService } from '../../database/prisma/prisma.service';
-
-const WebhookEventStatus = {
-  RECEIVED: 'RECEIVED',
-  FAILED: 'FAILED',
-  PROCESSED: 'PROCESSED',
-} as const;
 
 /** ----- Handle webhook database access. ----- **/
 @Injectable()

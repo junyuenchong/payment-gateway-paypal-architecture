@@ -7,14 +7,10 @@ import { toError } from '../../shared/helpers/error.util';
 import { IdempotencyService } from '../idempotency/idempotency.service';
 import { RedisLockService } from '../locks/redis-lock.service';
 import { QueueService } from '../queue/queue.service';
+import { WebhookEventStatus } from './enums/webhook-event-status.enum';
 import { WebhookRepository } from './webhook.repository';
 import { assertValidWebhookSignature } from './webhook.helper';
 import type { WebhookAuthHeaders } from './webhook.interface';
-const WebhookEventStatus = {
-  RECEIVED: 'RECEIVED',
-  FAILED: 'FAILED',
-  PROCESSED: 'PROCESSED',
-} as const;
 
 /** ----- Handle webhoo ervice class ----- **/
 @Injectable()
