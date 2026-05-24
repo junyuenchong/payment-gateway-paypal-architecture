@@ -111,25 +111,19 @@ PaymentWebhook/
 
 ## Inventory
 
-Amazon-style **checkout hold → payment extension → commit or release**.
+ERP-style **reserve stock** (`available = total_stock - reserved_stock`). Reservation rows are **kept for audit** (`RESERVED` → `CONFIRMED`, not deleted).
 
-### Lifecycle
+| Step | When | `reserved_stock` | `available` | `total_stock` |
+| ---- | ---- | ---------------- | ----------- | ------------- |
+| **1. Create order** | `POST /orders` + `items` | ↑ | ↓ | unchanged |
+| **2. Payment pending** | `PROCESSING` | unchanged | unchanged | unchanged |
+| **3. Payment success** | `PAID` | ↓ → 0 | unchanged | ↓ (sold) |
+| **4. Fail / cancel / TTL** | `FAILED`, `CANCELLED`, `EXPIRED` | ↓ | ↑ | unchanged |
 
-| Event | Stock |
-| ----- | ----- |
-| `POST /orders` + `items` | **Reserve** (`UNPAID`) |
-| `POST /orders/:id/payment-intent` | **Extend** TTL → `PROCESSING` |
-| Pay success | **Commit** (reduce `stock` + `reservedStock`) |
-| Fail / cancel / expire | **Release** |
-| Refund webhook | **Restore** on-hand |
+Example: 100 on-hand, reserve 10 → available 90. After pay: total **90**, reserved **0**, available **90**.
 
-### Models
-
-- `Product`, `OrderLineItem`, `StockReservation`, `StockLedgerEntry`
-- Atomic reserve: `UPDATE … WHERE stock - reservedStock >= qty`
-- Locks: DB row lock + Redis `lock:inventory:sku:{sku}` + sorted SKU order
-
-Full detail: [docs/paymentflow.md](./docs/paymentflow.md#inventory-amazon-style)
+Events: `OrderCreated` → reserve · `PaymentCompleted` → confirm · `PaymentExpired` → release.  
+Full detail: [docs/paymentflow.md](./docs/paymentflow.md#inventory-erp--e-commerce) · [inventory module](./backend/src/modules/inventory/README.md)
 
 ---
 
@@ -165,7 +159,8 @@ flowchart LR
 | `GET` | `/orders` | List orders (cursor pagination) |
 | `POST` | `/orders/:id/capture` | Enqueue capture fallback |
 | `POST` | `/webhooks/paypal` | Payment webhook intake |
-| `GET` | `/inventory/products` | SKU availability |
+| `GET` | `/inventory/products` | SKU availability (`totalStock`, `reserved`, `available`) |
+| `GET` | `/inventory/orders/:orderId/reservations` | Reservation audit trail (never deleted) |
 | `GET` | `/ops/metrics` | Queue metrics |
 | `GET` | `/ops/dlq` | Dead-letter jobs |
 | `POST` | `/ops/dlq/:jobId/replay` | Replay failed job |

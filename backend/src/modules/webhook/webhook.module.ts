@@ -16,7 +16,7 @@ import { WebhookService } from './webhook.service';
   imports: [
     HttpModule,
     IdempotencyModule,
-    InventoryModule,
+    forwardRef(() => InventoryModule),
     CqrsModule,
     LocksModule,
     forwardRef(() => QueueModule),

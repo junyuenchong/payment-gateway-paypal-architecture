@@ -53,7 +53,7 @@ sequenceDiagram
   Q->>G: Create checkout
   G-->>W: Webhook event
   W->>Q: process-webhook job
-  Q->>I: COMMIT or RELEASE
+  Q->>I: CONFIRM or RELEASE
 ```
 
 ---
@@ -74,9 +74,100 @@ sequenceDiagram
 
 ---
 
-## Inventory (Amazon-style)
+## Inventory (ERP / e-commerce)
 
-### When stock changes
+### Products table (`Product`)
+
+| ERP column | Prisma field | Meaning |
+| ---------- | ------------ | ------- |
+| `total_stock` | `stock` | Physical units in warehouse |
+| `reserved_stock` | `reservedStock` | Locked for open orders |
+| `available_stock` | `stock - reservedStock` | Sellable (computed, not stored) |
+
+`GET /inventory/products` returns `totalStock`, `reserved`, `available` (and `onHand` as alias of `totalStock`).
+
+### Reservation table (`StockReservation`) — never `DELETE`
+
+| ERP column | Prisma field | Notes |
+| ---------- | ------------ | ----- |
+| `order_id` | `orderId` | `ON DELETE RESTRICT` — order hard-delete cannot wipe audit |
+| `product_id` | `productId` | |
+| `qty` | `quantity` | |
+| `status` | `status` | See lifecycle |
+| `reserved_at` | `reservedAt` | Hold created |
+| `confirmed_at` | `confirmedAt` | Payment success |
+| `released_at` | `releasedAt` | Fail / cancel |
+| `expired_at` | `expiredAt` | TTL sweep |
+| `restocked_at` | `restockedAt` | Refund restock |
+| `expires_at` | `expiresAt` | Active TTL |
+
+**Why keep rows?** Audit trail, oversell debugging (“I paid but stock gone”), analytics (abandonment, failure rate), refunds (`CONFIRMED` → `RESTOCKED`), warehouse investigation.
+
+**On payment success (must match):**
+
+```text
+total_stock = 90
+reserved_stock = 0
+reservation.status = CONFIRMED   -- UPDATE, not DELETE
+reservation.confirmed_at = now()
+```
+
+**Lifecycle:**
+
+```text
+RESERVED → CONFIRMED → FULFILLED   (optional ship step; FULFILLED not auto-set yet)
+RESERVED → RELEASED | EXPIRED
+CONFIRMED → RESTOCKED              (refund webhook)
+```
+
+Archive old reservation rows with cron later if the table grows large.
+
+### Ledger (`StockLedgerEntry` / `inventory_transactions`)
+
+Append-only `reason`: `RESERVE` | `EXTEND` | `CONFIRM` | `RELEASE` | `EXPIRE` | `RESTOCK`  
+(Legacy: `COMMIT`, `RESTORE_REFUND`.)
+
+### Numeric example (qty 10 reserved from 100 on-hand)
+
+| Type | Before pay | After pay success |
+| ---- | ---------- | ----------------- |
+| Physical stock (`total_stock`) | 100 | **90** |
+| Reserved (`reserved_stock`) | 10 | **0** |
+| Available (`total_stock - reserved_stock`) | 90 | **90** |
+
+### Reserve stock flow
+
+| Step | Event / API | Product row | Reservation row |
+| ---- | ----------- | ----------- | --------------- |
+| **1. Create order** | `OrderCreated` → `POST /orders` | `reserved_stock` ↑, `available` ↓ | `RESERVED` |
+| **2. Payment pending** | `payment-intent` / `PROCESSING` | unchanged | stays `RESERVED` (extend `expiresAt`) |
+| **3. Payment success** | `PaymentCompleted` → `PAID` | `total_stock` ↓, `reserved_stock` ↓ | `RESERVED` → **`CONFIRMED`** |
+| **4. Failed / cancelled** | `PaymentFailed` | `reserved_stock` ↓ | `RESERVED` → **`RELEASED`** |
+| **4b. TTL expired** | `PaymentExpired` sweep | `reserved_stock` ↓ | `RESERVED` → **`EXPIRED`** |
+
+```mermaid
+stateDiagram-v2
+  [*] --> RESERVED: ReserveStock (create order)
+  RESERVED --> RESERVED: payment pending
+  RESERVED --> CONFIRMED: ConfirmReservation (paid)
+  RESERVED --> RELEASED: ReleaseReservation (fail/cancel)
+  RESERVED --> EXPIRED: ReleaseReservation (TTL)
+  CONFIRMED --> FULFILLED: shipped (optional)
+  CONFIRMED --> RESTOCKED: refund
+  CONFIRMED --> [*]: row kept
+  RELEASED --> [*]: row kept
+  EXPIRED --> [*]: row kept
+```
+
+### Event-driven mapping (this codebase)
+
+| Recommended event | Implementation |
+| ----------------- | -------------- |
+| `OrderCreated` → `ReserveStock` | `InventoryService.reserveAtCheckout` |
+| `PaymentCompleted` → `ConfirmReservation` + `DeductInventory` | `InventoryService.commitForOrder` |
+| `PaymentExpired` / failed → `ReleaseReservation` | `InventoryService.releaseForOrder` |
+
+### When stock changes (API index)
 
 | Step | API / event | Inventory action |
 | ---- | ----------- | ------------------ |
@@ -84,22 +175,25 @@ sequenceDiagram
 | 2 | `POST /orders/:id/payment-intent` | **Extend** TTL (no second reserve) |
 | 3 | Webhook / capture → `PAID` | **Commit** — `stock` and `reservedStock` decrease |
 | 4 | `FAILED` / `CANCELLED` / `EXPIRED` | **Release** — `reservedStock` decreases |
-| 5 | Refund webhook → `REFUNDED` | **Restore** — `stock` increases (`RESTORE_REFUND`) |
+| 5 | Refund webhook → `REFUNDED` | **Restock** — `stock` increases; reservation → `RESTOCKED` |
 
 ### Data stored
 
-- **Product** — `stock`, `reservedStock`, `version`
+- **Product** — `stock` (total_stock), `reservedStock`, `version` (optimistic lock)
 - **OrderLineItem** — `sku`, `quantity`, `unitPrice` per order
-- **StockReservation** — `ACTIVE` / `COMMITTED` / `RELEASED`, `expiresAt`, `reservationKey`
+- **StockReservation** — `RESERVED` / `CONFIRMED` / `RELEASED` / `EXPIRED`, `expiresAt`, `confirmedAt`, `productId`
 - **StockLedgerEntry** — append-only audit trail
 
-### Safety mechanisms
+### Safety mechanisms (production)
 
-- `UPDATE Product SET reservedStock = reservedStock + qty WHERE stock - reservedStock >= qty`
-- `SELECT … FOR UPDATE` per SKU in transactions
-- Redis lock: `lock:inventory:sku:{sku}`
+- Atomic reserve: `UPDATE … SET reservedStock = reservedStock + qty WHERE stock - reservedStock >= qty`
+- `SELECT … FOR UPDATE` per SKU inside transactions
+- Redis lock: `lock:inventory:sku:{sku}` (multi-instance)
 - SKUs locked in sorted order (deadlock avoidance)
-- DB checks: `stock >= 0`, `reservedStock >= 0`, `reservedStock <= stock`
+- DB `CHECK`: `stock >= 0`, `reservedStock >= 0`, `reservedStock <= stock`
+- DB `CHECK`: reservation `status` ∈ `RESERVED` … `RESTOCKED`
+- App `assertProductInventoryInvariant` after reserve / confirm / release / restock
+- Ops API: `GET /inventory/orders/:orderId/reservations` (full audit row + timestamps)
 
 ### Example create order body
 
@@ -177,7 +271,7 @@ Providers typically retry with exponential backoff until they receive `200`.
 | `process-webhook` | Apply payment result + inventory |
 | `capture-payment` | Manual capture fallback |
 | `expire-orders-sweep` | `PROCESSING` → `EXPIRED` + release stock |
-| `expire-reservations-sweep` | Release `ACTIVE` reservations past `expiresAt` |
+| `expire-reservations-sweep` | Release `RESERVED` reservations past `expiresAt` → `EXPIRED` |
 | `expire-unpaid-orders-sweep` | `UNPAID` → `EXPIRED` when hold expired |
 | `reconcile-orders-sweep` | Align stuck orders with gateway status |
 | `mock-capture-success` | Mock mode auto-capture |

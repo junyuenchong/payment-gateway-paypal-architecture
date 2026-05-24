@@ -46,6 +46,16 @@ import { PrismaService } from '../../database/prisma/prisma.service';
 
 ---
 
+## Inventory migrations (apply in order for production)
+
+| Migration | Purpose |
+| --------- | ------- |
+| `20260522000000_add_inventory` | Products, reservations, line items |
+| `20260522100000_production_inventory` | CHECK constraints, ledger, TTL |
+| `20260524120000_erp_reservation_statuses` | `RESERVED`/`CONFIRMED`, `productId`, `confirmedAt` |
+| `20260524130000_reservation_audit_timestamps` | `reservedAt`, `releasedAt`, `expiredAt`, `restockedAt`, FK RESTRICT |
+| `20260524140000_production_inventory_hardening` | Status CHECK, `fulfilledAt`, default `RESERVED` |
+
 ## Commands
 
 From `backend/`:

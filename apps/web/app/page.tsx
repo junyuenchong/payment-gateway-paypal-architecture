@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActionButton } from '../features/payment/components/ui/action-button';
 import { PaymentHistoryTable } from '../features/payment/components/payment-history-table';
+import { StatusCard } from '../features/payment/components/ui/status-card';
 import { uiTokens } from '../features/shared/lib/ui-tokens';
 import { useOrdersHistory } from '../features/payment/hooks/use-orders-history';
 import type { PaymentRow } from '../features/payment/hooks/use-orders-history';
@@ -71,6 +72,14 @@ export default function HomePage() {
   } = useOrdersHistory();
   const popupWatcherRef = useRef<number | null>(null);
   const statusPollerRef = useRef<number | null>(null);
+  const [openingCheckout, setOpeningCheckout] = useState(false);
+  const [paypalCheckoutUrl, setPaypalCheckoutUrl] = useState<string | null>(
+    null,
+  );
+  const [popupBlocked, setPopupBlocked] = useState(false);
+  const [gatewayMode, setGatewayMode] = useState<'idle' | 'paypal' | 'mock'>(
+    'idle',
+  );
 
   const totalAmount = useMemo(
     () =>
@@ -144,6 +153,9 @@ export default function HomePage() {
     });
     if (status === 'PAID' || status === 'FAILED' || status === 'CANCELLED') {
       setCreatedOrderId(null);
+      setGatewayMode('idle');
+      setPaypalCheckoutUrl(null);
+      setPopupBlocked(false);
     }
   };
 
@@ -207,7 +219,11 @@ export default function HomePage() {
    * Open PayPal Approval Window
    * ------------------------------------------------------
    */
-  const openPaypalPopup = (approvalUrl: string, orderId: string) => {
+  const openPaypalPopup = (
+    approvalUrl: string,
+    orderId: string,
+  ): boolean => {
+    setPaypalCheckoutUrl(approvalUrl);
     const popupWidth = 520;
     const popupHeight = 720;
     const left = Math.max(0, (window.screen.width - popupWidth) / 2);
@@ -223,13 +239,12 @@ export default function HomePage() {
 
     const popup = window.open(approvalUrl, 'paypalCheckout', features);
     if (!popup) {
-      window.open(approvalUrl, '_blank', 'noopener,noreferrer');
-      // Popup blocked/new tab opened: we won't get postMessage (no opener),
-      // so rely on polling to reflect final status.
+      setPopupBlocked(true);
       startStatusPolling(orderId);
-      return;
+      return false;
     }
 
+    setPopupBlocked(false);
     if (popupWatcherRef.current) {
       window.clearInterval(popupWatcherRef.current);
     }
@@ -244,6 +259,7 @@ export default function HomePage() {
         popupWatcherRef.current = null;
       }
     }, 700);
+    return true;
   };
 
   /**
@@ -263,26 +279,38 @@ export default function HomePage() {
     });
 
     void (async () => {
-      if (intent.provider === 'PAYPAL') {
-        if (intent.approvalUrl) {
-          openPaypalPopup(intent.approvalUrl, orderId);
-          return;
-        }
-
-        try {
-          const approvalUrl = await waitForApprovalUrl(orderId);
-          openPaypalPopup(approvalUrl, orderId);
-          return;
-        } catch (err) {
-          setCheckoutError(
-            toErrorMessage(err, 'Unable to create PayPal checkout URL'),
-          );
+      setOpeningCheckout(true);
+      setPaypalCheckoutUrl(null);
+      setPopupBlocked(false);
+      setGatewayMode('idle');
+      try {
+        if (intent.provider === 'MOCK') {
+          setGatewayMode('mock');
           startStatusPolling(orderId);
           return;
         }
-      }
 
-      startStatusPolling(orderId);
+        if (intent.provider === 'PAYPAL') {
+          setGatewayMode('paypal');
+          const approvalUrl = intent.approvalUrl
+            ? intent.approvalUrl
+            : await waitForApprovalUrl(orderId);
+
+          const opened = openPaypalPopup(approvalUrl, orderId);
+          if (!opened) {
+            setCheckoutError(
+              'PayPal popup was blocked. Use the link below to open checkout.',
+            );
+          }
+        }
+      } catch (err) {
+        setCheckoutError(
+          toErrorMessage(err, 'Unable to create PayPal checkout URL'),
+        );
+        startStatusPolling(orderId);
+      } finally {
+        setOpeningCheckout(false);
+      }
     })();
   };
 
@@ -293,7 +321,10 @@ export default function HomePage() {
    */
   const requestAndContinuePayment = async (orderId: string) => {
     const intent = await requestPaymentIntent(orderId);
-    if (!intent) return false;
+    if (!intent) {
+      setCheckoutError('Unable to start payment. Check that the backend API is reachable.');
+      return false;
+    }
     setCreatedOrderId(orderId);
     continuePaymentFlow(orderId, intent);
     return true;
@@ -407,6 +438,8 @@ export default function HomePage() {
    */
   const handlePaypalMockCheckout = async () => {
     setCheckoutError(undefined);
+    setPaypalCheckoutUrl(null);
+    setPopupBlocked(false);
     try {
       const order = await createOrder({
         amount: totalAmount,
@@ -529,11 +562,55 @@ export default function HomePage() {
             onClick={() => {
               void handlePaypalMockCheckout();
             }}
-            disabled={loading}
+            disabled={loading || openingCheckout}
           >
-            {loading ? 'Processing...' : 'Pay with PayPal'}
+            {loading || openingCheckout
+              ? 'Opening PayPal...'
+              : 'Pay with PayPal'}
           </ActionButton>
         </div>
+
+        {openingCheckout ? (
+          <div className="mt-4">
+            <StatusCard
+              title="PayPal Checkout"
+              status="Preparing gateway..."
+              statusClassName="text-amber-300"
+              description="Creating your PayPal session. This usually takes a few seconds."
+            />
+          </div>
+        ) : null}
+
+        {gatewayMode === 'mock' ? (
+          <div className="mt-4">
+            <StatusCard
+              title="Mock Payment Gateway"
+              status="Processing (no PayPal UI)"
+              statusClassName="text-sky-300"
+              description="MOCK_PAYMENT_GATEWAY is enabled on the backend. Payment completes via a simulated webhook."
+            />
+          </div>
+        ) : null}
+
+        {paypalCheckoutUrl ? (
+          <div className="mt-4 rounded-lg border border-slate-600 bg-slate-800/80 px-4 py-3 text-sm text-slate-200">
+            <p className="font-medium text-slate-100">PayPal checkout</p>
+            {popupBlocked ? (
+              <p className="mt-1 text-slate-400">
+                Your browser blocked the popup window.
+              </p>
+            ) : null}
+            <a
+              href={paypalCheckoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-block font-semibold text-blue-400 underline hover:text-blue-300"
+            >
+              Open PayPal to complete payment
+            </a>
+          </div>
+        ) : null}
+
         {createdOrderId ? (
           <div className="mt-3 flex flex-wrap gap-2">
             <ActionButton

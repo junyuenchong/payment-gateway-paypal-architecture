@@ -4,6 +4,7 @@ import { CqrsModule } from '@nestjs/cqrs';
 
 import { AppConfigModule, AppConfigService } from '../../config';
 import { InventoryModule } from '../inventory/inventory.module';
+import { PaymentModule } from '../payment/payment.module';
 import { WebhookModule } from '../webhook/webhook.module';
 import { QUEUE_NAME } from './queue.constant';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
@@ -17,6 +18,7 @@ import { QueueService } from './queue.service';
 @Module({
   imports: [
     CqrsModule,
+    PaymentModule,
     forwardRef(() => InventoryModule),
     forwardRef(() => WebhookModule),
     BullModule.registerQueueAsync({

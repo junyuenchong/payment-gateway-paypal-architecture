@@ -151,7 +151,7 @@ These pages notify the opener window (`postMessage`) so the checkout page can re
 ## Commands
 
 ```bash
-npm run dev          # Dev server (port 3000)
+npm run dev          # Dev server (port 8080; API stays on backend :3000)
 npm run build        # Production build
 npm run start        # Run production build
 npm run lint         # ESLint

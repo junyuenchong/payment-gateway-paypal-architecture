@@ -3,8 +3,12 @@ import { Prisma } from '@prisma/client';
 
 import { OrderStatus } from '../order/enums/order-status.enum';
 import { StockMovementReason } from './enums/stock-movement-reason.enum';
-import { StockReservationStatus } from './enums/stock-reservation-status.enum';
+import {
+  StockReservationStatus,
+  TERMINAL_STOCK_RESERVATION_STATUSES,
+} from './enums/stock-reservation-status.enum';
 import { buildReservationKey, sortSkusForLock } from './inventory.constant';
+import { assertProductInventoryInvariant } from './inventory.invariant';
 import { PrismaService } from '../../database/prisma/prisma.service';
 
 type Tx = Prisma.TransactionClient;
@@ -20,6 +24,32 @@ type ProductRow = {
 @Injectable()
 export class InventoryRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  /** ----- Audit: all reservation rows for an order (never deleted). ----- **/
+  listReservationsByOrderId(orderId: string) {
+    return this.prisma.stockReservation.findMany({
+      where: { orderId },
+      orderBy: [{ sku: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        orderId: true,
+        productId: true,
+        sku: true,
+        quantity: true,
+        status: true,
+        reservationKey: true,
+        expiresAt: true,
+        reservedAt: true,
+        confirmedAt: true,
+        fulfilledAt: true,
+        releasedAt: true,
+        expiredAt: true,
+        restockedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
 
   /** ----- List products with sellable quantity. ----- **/
   listProductsAvailability() {
@@ -57,7 +87,7 @@ export class InventoryRepository {
       const existing = await tx.stockReservation.findUnique({
         where: { reservationKey },
       });
-      if (existing?.status === StockReservationStatus.ACTIVE) {
+      if (existing?.status === StockReservationStatus.RESERVED) {
         await tx.stockReservation.update({
           where: { id: existing.id },
           data: { expiresAt },
@@ -65,11 +95,13 @@ export class InventoryRepository {
         continue;
       }
       if (
-        existing?.status === StockReservationStatus.COMMITTED ||
-        existing?.status === StockReservationStatus.RELEASED
+        existing?.status &&
+        TERMINAL_STOCK_RESERVATION_STATUSES.includes(
+          existing.status as (typeof TERMINAL_STOCK_RESERVATION_STATUSES)[number],
+        )
       ) {
         throw new BadRequestException(
-          `Cannot re-reserve ${sku} for order ${orderId} (reservation ${existing.status})`,
+          `Cannot re-reserve ${sku} for order ${orderId} (reservation ${existing?.status})`,
         );
       }
 
@@ -85,9 +117,10 @@ export class InventoryRepository {
       await tx.stockReservation.create({
         data: {
           orderId,
+          productId: product.id,
           sku,
           quantity: item.quantity,
-          status: StockReservationStatus.ACTIVE,
+          status: StockReservationStatus.RESERVED,
           reservationKey,
           expiresAt,
         },
@@ -103,6 +136,7 @@ export class InventoryRepository {
         reason: StockMovementReason.RESERVE,
         correlationId: orderId,
       });
+      await this.assertProductAfterMutation(tx, sku);
     }
   }
 
@@ -113,7 +147,7 @@ export class InventoryRepository {
     expiresAt: Date,
   ): Promise<void> {
     const active = await tx.stockReservation.findMany({
-      where: { orderId, status: StockReservationStatus.ACTIVE },
+      where: { orderId, status: StockReservationStatus.RESERVED },
     });
     if (active.length === 0) {
       await this.reserveForOrder(orderId, tx, expiresAt);
@@ -121,7 +155,7 @@ export class InventoryRepository {
     }
 
     await tx.stockReservation.updateMany({
-      where: { orderId, status: StockReservationStatus.ACTIVE },
+      where: { orderId, status: StockReservationStatus.RESERVED },
       data: { expiresAt },
     });
 
@@ -142,14 +176,15 @@ export class InventoryRepository {
     }
   }
 
-  /** ----- Commit reserved stock after payment success. ----- **/
+  /** ----- Payment success: RESERVED → CONFIRMED (row kept; sets confirmedAt). ----- **/
   async commitForOrder(orderId: string, tx: Tx): Promise<void> {
     const reservations = await tx.stockReservation.findMany({
-      where: { orderId, status: StockReservationStatus.ACTIVE },
+      where: { orderId, status: StockReservationStatus.RESERVED },
       orderBy: { sku: 'asc' },
     });
     if (reservations.length === 0) return;
 
+    const confirmedAt = new Date();
     for (const reservation of reservations) {
       const product = await this.lockProduct(tx, reservation.sku);
       if (product.reservedStock < reservation.quantity) {
@@ -169,7 +204,11 @@ export class InventoryRepository {
 
       await tx.stockReservation.update({
         where: { id: reservation.id },
-        data: { status: StockReservationStatus.COMMITTED },
+        data: {
+          status: StockReservationStatus.CONFIRMED,
+          confirmedAt,
+          productId: product.id,
+        },
       });
 
       await this.appendLedger(tx, {
@@ -180,10 +219,20 @@ export class InventoryRepository {
         quantity: reservation.quantity,
         stockDelta: -reservation.quantity,
         reservedDelta: -reservation.quantity,
-        reason: StockMovementReason.COMMIT,
+        reason: StockMovementReason.CONFIRM,
         correlationId: orderId,
       });
+      await this.assertProductAfterMutation(tx, reservation.sku);
     }
+  }
+
+  /** ----- Shipped / WMS: CONFIRMED → FULFILLED (no stock change). ----- **/
+  async fulfillForOrder(orderId: string, tx: Tx): Promise<void> {
+    const fulfilledAt = new Date();
+    await tx.stockReservation.updateMany({
+      where: { orderId, status: StockReservationStatus.CONFIRMED },
+      data: { status: StockReservationStatus.FULFILLED, fulfilledAt },
+    });
   }
 
   /** ----- Release reserved stock (fail / cancel / manual). ----- **/
@@ -195,10 +244,16 @@ export class InventoryRepository {
       | typeof StockMovementReason.EXPIRE = StockMovementReason.RELEASE,
   ): Promise<void> {
     const reservations = await tx.stockReservation.findMany({
-      where: { orderId, status: StockReservationStatus.ACTIVE },
+      where: { orderId, status: StockReservationStatus.RESERVED },
       orderBy: { sku: 'asc' },
     });
     if (reservations.length === 0) return;
+
+    const nextStatus =
+      reason === StockMovementReason.EXPIRE
+        ? StockReservationStatus.EXPIRED
+        : StockReservationStatus.RELEASED;
+    const terminalAt = new Date();
 
     for (const reservation of reservations) {
       const product = await this.lockProduct(tx, reservation.sku);
@@ -213,7 +268,13 @@ export class InventoryRepository {
 
       await tx.stockReservation.update({
         where: { id: reservation.id },
-        data: { status: StockReservationStatus.RELEASED },
+        data: {
+          status: nextStatus,
+          productId: product.id,
+          ...(nextStatus === StockReservationStatus.EXPIRED
+            ? { expiredAt: terminalAt }
+            : { releasedAt: terminalAt }),
+        },
       });
 
       await this.appendLedger(tx, {
@@ -227,17 +288,27 @@ export class InventoryRepository {
         reason,
         correlationId: orderId,
       });
+      await this.assertProductAfterMutation(tx, reservation.sku);
     }
   }
 
   /** ----- Restore on-hand stock after full refund. ----- **/
   async restoreForRefund(orderId: string, tx: Tx): Promise<void> {
     const committed = await tx.stockReservation.findMany({
-      where: { orderId, status: StockReservationStatus.COMMITTED },
+      where: {
+        orderId,
+        status: {
+          in: [
+            StockReservationStatus.CONFIRMED,
+            StockReservationStatus.FULFILLED,
+          ],
+        },
+      },
       orderBy: { sku: 'asc' },
     });
     if (committed.length === 0) return;
 
+    const restockedAt = new Date();
     for (const reservation of committed) {
       const product = await this.lockProduct(tx, reservation.sku);
 
@@ -249,6 +320,14 @@ export class InventoryRepository {
         },
       });
 
+      await tx.stockReservation.update({
+        where: { id: reservation.id },
+        data: {
+          status: StockReservationStatus.RESTOCKED,
+          restockedAt,
+        },
+      });
+
       await this.appendLedger(tx, {
         productId: product.id,
         sku: reservation.sku,
@@ -257,17 +336,18 @@ export class InventoryRepository {
         quantity: reservation.quantity,
         stockDelta: reservation.quantity,
         reservedDelta: 0,
-        reason: StockMovementReason.RESTORE_REFUND,
+        reason: StockMovementReason.RESTOCK,
         correlationId: orderId,
       });
+      await this.assertProductAfterMutation(tx, reservation.sku);
     }
   }
 
-  /** ----- Expire stale ACTIVE reservations (TTL sweep). ----- **/
+  /** ----- Expire stale RESERVED rows (TTL sweep) → status EXPIRED. ----- **/
   async expireStaleReservations(cutoff: Date): Promise<{ count: number }> {
     const stale = await this.prisma.stockReservation.findMany({
       where: {
-        status: StockReservationStatus.ACTIVE,
+        status: StockReservationStatus.RESERVED,
         expiresAt: { lt: cutoff },
       },
       select: { orderId: true },
@@ -296,7 +376,7 @@ export class InventoryRepository {
         status: OrderStatus.UNPAID,
         updatedAt: { lt: cutoff },
         stockReservations: {
-          none: { status: StockReservationStatus.ACTIVE },
+          none: { status: StockReservationStatus.RESERVED },
         },
       },
       data: { status: OrderStatus.EXPIRED },
@@ -341,7 +421,9 @@ export class InventoryRepository {
       );
     }
 
-    return updated[0];
+    const row = updated[0];
+    assertProductInventoryInvariant(row);
+    return row;
   }
 
   private async lockProduct(tx: Tx, sku: string): Promise<ProductRow> {
@@ -356,7 +438,20 @@ export class InventoryRepository {
       throw new BadRequestException(`Product not found: ${sku}`);
     }
 
-    return rows[0];
+    const row = rows[0];
+    assertProductInventoryInvariant(row);
+    return row;
+  }
+
+  private async assertProductAfterMutation(tx: Tx, sku: string): Promise<void> {
+    const row = await tx.product.findUnique({
+      where: { sku },
+      select: { sku: true, stock: true, reservedStock: true },
+    });
+    if (!row) {
+      throw new BadRequestException(`Product not found after mutation: ${sku}`);
+    }
+    assertProductInventoryInvariant(row);
   }
 
   private async appendLedger(

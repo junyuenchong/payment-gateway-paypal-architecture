@@ -9,15 +9,16 @@ datasource db {
 }
 
 model Product {
-  id            String   @id @default(cuid())
-  sku           String   @unique
-  name          String
-  stock         Int
-  reservedStock Int      @default(0)
-  version       Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  ledgerEntries StockLedgerEntry[]
+  id                String             @id @default(cuid())
+  sku               String             @unique
+  name              String
+  stock             Int // total_stock / physical on-hand
+  reservedStock     Int                @default(0)
+  version           Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  ledgerEntries     StockLedgerEntry[]
+  stockReservations StockReservation[]
 }
 
 model StockLedgerEntry {
@@ -49,20 +50,30 @@ model OrderLineItem {
   @@index([orderId])
 }
 
+// Audit trail: update status (CONFIRMED / RELEASED / …); never DELETE rows.
 model StockReservation {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   orderId        String
-  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order          Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  productId      String?
+  product        Product?  @relation(fields: [productId], references: [id])
   sku            String
   quantity       Int
-  status         String   @default("ACTIVE")
-  reservationKey String   @unique
+  status         String    @default("RESERVED")
+  reservationKey String    @unique
   expiresAt      DateTime
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  reservedAt     DateTime  @default(now())
+  confirmedAt    DateTime?
+  fulfilledAt    DateTime?
+  releasedAt     DateTime?
+  expiredAt      DateTime?
+  restockedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([orderId, status])
   @@index([status, expiresAt])
+  @@index([productId])
 }
 
 model Order {

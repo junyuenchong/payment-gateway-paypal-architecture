@@ -1,32 +1,87 @@
 # Inventory module
 
-Amazon-style stock reservation: checkout hold, payment extension, commit, release, refund restore.
+ERP / e-commerce **reserve stock** flow with persistent `StockReservation` rows (never delete on confirm).
 
 **Layering:** `Controller` → `Query` / `Command` → `Handler` → `Service` → `Repository`
 
-Cross-module callers (`OrderRepository`, `WebhookRepository`, `QueueRepository`, …) use **`InventoryService`** inside shared DB transactions.
-
-**DB:** `InventoryRepository` injects `PrismaService` from `../../database/prisma/prisma.service`.
+Cross-module callers use **`InventoryService`** inside shared DB transactions.
 
 ---
 
-## Structure
+## Data model
+
+### `Product` (inventory)
+
+| ERP | DB | Formula |
+| --- | -- | ------- |
+| `total_stock` | `stock` | Physical on-hand |
+| `reserved_stock` | `reservedStock` | Locked qty |
+| `available_stock` | — | `stock - reservedStock` |
+
+### `StockReservation` (audit + hold) — never `DELETE`
+
+| Field | Purpose |
+| ----- | ------- |
+| `orderId`, `productId`, `sku`, `quantity` | Who / what / how much |
+| `status` | See lifecycle below |
+| `reservedAt` | When hold was created |
+| `confirmedAt` | Payment success |
+| `releasedAt` | Fail / cancel release |
+| `expiredAt` | TTL sweep |
+| `restockedAt` | Refund restock |
+| `expiresAt` | Active hold TTL |
+| `reservationKey` | Idempotency (`reserve:{orderId}:{sku}`) |
+
+**Enterprise rule:** `UPDATE status → CONFIRMED` — **not** `DELETE FROM stock_reservations`.  
+`Order` delete is `RESTRICT` so audit rows are not cascade-wiped.
+
+**Lifecycle:**
 
 ```text
-inventory/
-├── application/
-│   ├── commands/          # CQRS commands (sweeps)
-│   ├── handlers/          # Command + query handlers
-│   └── queries/           # Read models
-├── cqrs/index.ts          # Handler registration
-├── dto/                   # Response types
-├── inventory.controller.ts
-├── inventory.service.ts   # Domain + Redis SKU locks
-├── inventory.repository.ts
-├── inventory.scheduler.ts # Schedules sweep jobs via QueueService
-├── enums/                 # stock-reservation-status, stock-movement-reason
-└── inventory.constant.ts  # helpers (reservation keys, SKU lock order)
+RESERVED → CONFIRMED → FULFILLED   (optional shipping step)
+RESERVED → RELEASED | EXPIRED      (fail / cancel / timeout)
+CONFIRMED → RESTOCKED              (refund)
 ```
+
+Archive old rows later with cron if the table grows.
+
+### `StockLedgerEntry` (`inventory_transactions`)
+
+Append-only: `RESERVE` | `EXTEND` | `CONFIRM` | `RELEASE` | `EXPIRE` | `RESTOCK`  
+(Legacy rows may read `COMMIT` / `RESTORE_REFUND`.)
+
+---
+
+## Flow
+
+| Step | Service | Reservation status | `total_stock` | `reserved_stock` |
+| ---- | ------- | -------------------- | ------------- | ---------------- |
+| Create order | `reserveAtCheckout` | `RESERVED` | unchanged | ↑ |
+| Payment pending | `extendForPayment` | `RESERVED` | unchanged | unchanged |
+| Payment success | `commitForOrder` | **`CONFIRMED`** | ↓ | ↓ |
+| Fail / cancel | `releaseForOrder` | **`RELEASED`** | unchanged | ↓ |
+| TTL sweep | `expireStaleReservations` | **`EXPIRED`** | unchanged | ↓ |
+
+### Numeric example (must match)
+
+| Type | Before pay | After pay success |
+| ---- | ---------- | ----------------- |
+| Physical stock (`total_stock`) | 100 | **90** |
+| Reserved (`reserved_stock`) | 10 | **0** |
+| Available | 90 | **90** |
+
+Executable spec: `inventory.snapshot.spec.ts`
+
+---
+
+## Concurrency
+
+- DB transaction per order / SKU batch
+- `SELECT … FOR UPDATE` on `Product`
+- Optimistic `version` on `Product`
+- Redis `lock:inventory:sku:{sku}`
+- SKUs locked in sorted order
+- Queue-driven payment + webhook workers
 
 ---
 
@@ -35,16 +90,27 @@ inventory/
 | Type | Name | Used by |
 | ---- | ---- | ------- |
 | Query | `ListProductsQuery` | `GET /inventory/products` |
-| Command | `ExpireStaleReservationsCommand` | Queue `expire-reservations-sweep` |
-| Command | `ExpireUnpaidOrdersCommand` | Queue `expire-unpaid-orders-sweep` |
+| Query | `ListOrderReservationsQuery` | `GET /inventory/orders/:orderId/reservations` |
+| Command | `ExpireStaleReservationsCommand` | Queue sweep |
+| Command | `ExpireUnpaidOrdersCommand` | Queue sweep |
 
-Transactional methods (`reserveAtCheckout`, `commitForOrder`, `releaseForOrder`, `restoreForRefund`, …) live on **`InventoryService`** only.
+Transactional API: `reserveAtCheckout`, `extendForPayment`, `commitForOrder`, `fulfillForOrder`, `releaseForOrder`, `restoreForRefund`.
+
+## Production guarantees
+
+| Layer | Mechanism |
+| ----- | --------- |
+| DB | `CHECK (stock >= 0)`, `CHECK (reservedStock >= 0)`, `CHECK (reservedStock <= stock)` |
+| DB | `CHECK (status IN ('RESERVED',…,'RESTOCKED'))` |
+| App | `assertProductInventoryInvariant` after each mutation |
+| Concurrency | `SELECT FOR UPDATE`, `version`, Redis SKU locks, sorted SKU order |
+| Audit | Rows never `DELETE`; `ON DELETE RESTRICT` on `orderId` |
+| Ledger | Append-only `StockLedgerEntry` (`RESERVE`, `CONFIRM`, `RELEASE`, `RESTOCK`, …) |
 
 ---
 
 ## Related docs
 
 - [Payment & inventory flow](../../../docs/paymentflow.md)
-- [Queue module](../queue/README.md) — sweep job handlers
+- [Queue module](../queue/README.md)
 - [Prisma schema](../../../prisma/README.md)
-- [Project README](../../../README.md)
