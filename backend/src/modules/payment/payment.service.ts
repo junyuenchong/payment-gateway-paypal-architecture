@@ -5,7 +5,7 @@ import type {
   CreateCheckoutOrderResultDto,
 } from './dto/payment.dto';
 import type { CreateCheckoutOrderInput } from './dto/payment.input';
-import { PaymentGatewayService } from '../payment-gateway/payment-gateway.service';
+import { PaymentGatewayService } from '../../infrastructure/payment-gateway/payment-gateway.service';
 
 /** ----- Handle payment operations. ----- **/
 @Injectable()

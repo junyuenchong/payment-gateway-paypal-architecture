@@ -2,13 +2,12 @@ import { HttpModule } from '@nestjs/axios';
 import { Module, forwardRef } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 
-import { IdempotencyModule } from '../idempotency/idempotency.module';
+import { IdempotencyModule } from '../../infrastructure/idempotency/idempotency.module';
 import { InventoryModule } from '../inventory/inventory.module';
-import { LocksModule } from '../locks/locks.module';
-import { QueueModule } from '../queue/queue.module';
+import { LocksModule } from '../../infrastructure/locks/locks.module';
+import { QueueModule } from '../../infrastructure/queue/queue.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
-import { WebhooksController } from './webhooks.controller';
-import { WebhookRepository } from './webhook.repository';
+import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
 
 /** ----- Configure webhook module. ----- **/
@@ -21,10 +20,9 @@ import { WebhookService } from './webhook.service';
     LocksModule,
     forwardRef(() => QueueModule),
   ],
-  controllers: [WebhooksController],
+  controllers: [WebhookController],
   providers: [
     WebhookService,
-    WebhookRepository,
     ...EventHandlers,
     ...CommandHandlers,
     ...QueryHandlers,

@@ -1,5 +1,5 @@
-import { CaptureCheckoutOrderHandler } from '../application/handlers/capture-checkout-order.handler';
-import { CreateCheckoutOrderHandler } from '../application/handlers/create-checkout-order.handler';
+import { CaptureCheckoutOrderHandler } from './handlers/capture-checkout-order.handler';
+import { CreateCheckoutOrderHandler } from './handlers/create-checkout-order.handler';
 
 export const CommandHandlers = [
   CreateCheckoutOrderHandler,

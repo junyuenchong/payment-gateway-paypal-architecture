@@ -1,4 +1,4 @@
-import { ReceiveWebhookHandler } from '../application/handlers/receive-webhook.handler';
+import { ReceiveWebhookHandler } from './handlers/receive-webhook.handler';
 
 /** ----- Define webhook command handlers ----- **/
 export const CommandHandlers = [ReceiveWebhookHandler];

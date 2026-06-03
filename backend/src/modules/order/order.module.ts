@@ -1,20 +1,18 @@
 import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { InventoryModule } from '../inventory/inventory.module';
-import { LocksModule } from '../locks/locks.module';
-import { QueueModule } from '../queue/queue.module';
+import { LocksModule } from '../../infrastructure/locks/locks.module';
+import { QueueModule } from '../../infrastructure/queue/queue.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
-import { OrdersController } from './orders.controller';
-import { OrderRepository } from './order.repository';
+import { OrderController } from './order.controller';
 import { OrderService } from './order.service';
 
 /** ----- Configure order module. ----- **/
 @Module({
   imports: [CqrsModule, LocksModule, InventoryModule, QueueModule],
-  controllers: [OrdersController],
+  controllers: [OrderController],
   providers: [
     OrderService,
-    OrderRepository,
     ...EventHandlers,
     ...CommandHandlers,
     ...QueryHandlers,

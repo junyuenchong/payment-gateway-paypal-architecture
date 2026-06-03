@@ -1,12 +1,10 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 
-import { LocksModule } from '../locks/locks.module';
-import { QueueModule } from '../queue/queue.module';
+import { LocksModule } from '../../infrastructure/locks/locks.module';
+import { QueueModule } from '../../infrastructure/queue/queue.module';
 import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';
 import { InventoryController } from './inventory.controller';
-import { InventoryRepository } from './inventory.repository';
-import { InventorySchedulerService } from './inventory.scheduler';
 import { InventoryService } from './inventory.service';
 
 /** ----- Configure inventory module. ----- **/
@@ -18,9 +16,7 @@ import { InventoryService } from './inventory.service';
   ],
   controllers: [InventoryController],
   providers: [
-    InventoryRepository,
     InventoryService,
-    InventorySchedulerService,
     ...EventHandlers,
     ...CommandHandlers,
     ...QueryHandlers,

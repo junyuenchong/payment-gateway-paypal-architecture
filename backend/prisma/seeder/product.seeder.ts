@@ -10,8 +10,12 @@ export async function seedProducts(): Promise<void> {
   for (const product of DEMO_PRODUCTS) {
     await prisma.product.upsert({
       where: { sku: product.sku },
-      create: product,
-      update: { name: product.name },
+      create: { ...product, reservedStock: 0 },
+      update: {
+        name: product.name,
+        stock: product.stock,
+        reservedStock: 0,
+      },
     });
   }
 }

@@ -1,9 +1,9 @@
-import { CapturePaymentHandler } from '../application/handlers/capture-payment.handler';
-import { ScheduleCapturePaymentHandler } from '../application/handlers/schedule-capture-payment.handler';
-import { CreateOrderHandler } from '../application/handlers/create-order.handler';
-import { CreatePaymentIntentHandler } from '../application/handlers/create-payment-intent.handler';
-import { GetOrderHandler } from '../application/handlers/get-order.handler';
-import { ListOrdersHandler } from '../application/handlers/list-orders.handler';
+import { CapturePaymentHandler } from './handlers/capture-payment.handler';
+import { ScheduleCapturePaymentHandler } from './handlers/schedule-capture-payment.handler';
+import { CreateOrderHandler } from './handlers/create-order.handler';
+import { CreatePaymentIntentHandler } from './handlers/create-payment-intent.handler';
+import { GetOrderHandler } from './handlers/get-order.handler';
+import { ListOrdersHandler } from './handlers/list-orders.handler';
 
 export const CommandHandlers = [
   CreateOrderHandler,

@@ -1,8 +1,8 @@
 import { Controller, Get, Param } from '@nestjs/common';
 import { QueryBus } from '@nestjs/cqrs';
 
-import { ListOrderReservationsQuery } from './application/queries/list-order-reservations.query';
-import { ListProductsQuery } from './application/queries/list-products.query';
+import { ListOrderReservationsQuery } from './cqrs/queries/list-order-reservations.query';
+import { ListProductsQuery } from './cqrs/queries/list-products.query';
 
 /** ----- Read-only inventory availability API. ----- **/
 @Controller('inventory')

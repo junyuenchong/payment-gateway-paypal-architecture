@@ -1,40 +1,31 @@
-# Payment & inventory flow
+# Payment and inventory flow
 
-How checkout, stock reservation, payment, and webhooks work in **this codebase** (NestJS + BullMQ + Prisma).
+This doc explains what happens when a customer checks out: how stock is held, how PayPal (or mock) payment runs, and how webhooks update the order.
 
-> Setup, env vars, and API list: [README](../README.md)
+Stack: NestJS, BullMQ, Prisma, PostgreSQL, Redis.
 
----
-
-## Table of contents
-
-1. [Goals](#goals)
-2. [High-level sequence](#high-level-sequence)
-3. [Order statuses](#order-statuses)
-4. [Inventory (Amazon-style)](#inventory-amazon-style)
-5. [Payment steps](#payment-steps)
-6. [Webhooks](#webhooks)
-7. [Background jobs](#background-jobs)
-8. [Idempotency & locks](#idempotency--locks)
-9. [Failure & refund](#failure--refund)
-10. [Environment variables](#environment-variables)
-11. [Commands](#commands)
+**Setup and API list:** [README](../README.md)
 
 ---
 
-## Goals
+## What we are trying to achieve
 
-| Goal | How this project does it |
-| ---- | ------------------------ |
-| Reliable | Async workers, retries, DLQ + replay |
-| Secure | Webhook signature verification |
-| Idempotent | `ProcessedEvent`, deterministic BullMQ `jobId`, reservation keys |
-| No oversell | Atomic SQL + row locks + per-SKU Redis locks |
-| Recoverable | Sweeps for expired payments, reservations, and unpaid orders |
+| Goal | How this repo does it |
+| ---- | --------------------- |
+| Payments do not block the API forever | Slow work runs in BullMQ workers |
+| Webhooks can be retried safely | Signature check + `ProcessedEvent` dedup |
+| No double charges or double reserves | Locks + idempotent job and reservation keys |
+| No overselling | DB transactions, row locks, per-SKU Redis locks |
+| Stuck orders get cleaned up | Scheduled sweep jobs |
 
 ---
 
-## High-level sequence
+## Big picture (one checkout)
+
+1. Customer creates an order (`POST /orders`). Stock is **reserved**; order is `UNPAID`.
+2. Customer starts checkout (`POST /orders/:id/payment-intent`). Hold is extended; a worker opens PayPal (or mock).
+3. Customer pays in PayPal. Provider sends a webhook.
+4. Webhook is verified and queued. A worker sets order to `PAID` (or failed/cancelled) and **commits** or **releases** stock.
 
 ```mermaid
 sequenceDiagram
@@ -62,88 +53,84 @@ sequenceDiagram
 
 | Status | Meaning |
 | ------ | ------- |
-| `UNPAID` | Order created; stock may be reserved |
-| `PROCESSING` | Payment in progress at gateway |
-| `PAID` | Payment captured; stock committed |
-| `FAILED` | Payment failed; reservation released |
-| `CANCELLED` | Payment cancelled; reservation released |
-| `EXPIRED` | Checkout or payment timed out |
-| `REFUNDING` / `PARTIALLY_REFUNDED` / `REFUNDED` | Refund lifecycle |
+| `UNPAID` | Order exists; stock may be reserved |
+| `PROCESSING` | Customer is paying at the gateway |
+| `PAID` | Paid; stock committed (sold) |
+| `FAILED` | Payment failed; hold released |
+| `CANCELLED` | Cancelled at gateway; hold released |
+| `EXPIRED` | Timed out |
+| `REFUNDING` / `PARTIALLY_REFUNDED` / `REFUNDED` | Refund in progress or done |
 
-**Rule:** Terminal payment status updates run in the **async webhook worker** (inside a DB transaction), not in the HTTP webhook handler after enqueue.
+**Important:** The HTTP webhook handler only saves the event and enqueues work. The real status change happens in the **worker**, inside one database transaction.
 
 ---
 
-## Inventory (ERP / e-commerce)
+## Inventory in plain language
 
-### Products table (`Product`)
+We do not subtract stock at “add to cart.” We **reserve** it until payment succeeds or the hold expires.
 
-| ERP column | Prisma field | Meaning |
-| ---------- | ------------ | ------- |
-| `total_stock` | `stock` | Physical units in warehouse |
-| `reserved_stock` | `reservedStock` | Locked for open orders |
-| `available_stock` | `stock - reservedStock` | Sellable (computed, not stored) |
+### Product row (`Product`)
 
-`GET /inventory/products` returns `totalStock`, `reserved`, `available` (and `onHand` as alias of `totalStock`).
+| Name you will see | DB field | Meaning |
+| ----------------- | -------- | ------- |
+| Total on hand | `stock` | Physical quantity |
+| Held for orders | `reservedStock` | Locked but not sold yet |
+| Available to sell | (computed) | `stock - reservedStock` |
 
-### Reservation table (`StockReservation`) — never `DELETE`
+`GET /inventory/products` returns `totalStock`, `reserved`, `available`.
 
-| ERP column | Prisma field | Notes |
-| ---------- | ------------ | ----- |
-| `order_id` | `orderId` | `ON DELETE RESTRICT` — order hard-delete cannot wipe audit |
-| `product_id` | `productId` | |
-| `qty` | `quantity` | |
-| `status` | `status` | See lifecycle |
-| `reserved_at` | `reservedAt` | Hold created |
-| `confirmed_at` | `confirmedAt` | Payment success |
-| `released_at` | `releasedAt` | Fail / cancel |
-| `expired_at` | `expiredAt` | TTL sweep |
-| `restocked_at` | `restockedAt` | Refund restock |
-| `expires_at` | `expiresAt` | Active TTL |
+### Reservation row (`StockReservation`)
 
-**Why keep rows?** Audit trail, oversell debugging (“I paid but stock gone”), analytics (abandonment, failure rate), refunds (`CONFIRMED` → `RESTOCKED`), warehouse investigation.
+Each hold is one row per order line. We **do not delete** these rows; we change `status` for audit.
 
-**On payment success (must match):**
+| Field | Purpose |
+| ----- | ------- |
+| `orderId`, `productId`, `sku`, `quantity` | What is held |
+| `status` | `RESERVED`, `CONFIRMED`, `RELEASED`, `EXPIRED`, `RESTOCKED`, … |
+| `reservedAt`, `confirmedAt`, `releasedAt`, … | Timeline |
+| `expiresAt` | When the hold times out |
+| `reservationKey` | Stops double reserve (`reserve:{orderId}:{sku}`) |
+
+Deleting an order is blocked (`ON DELETE RESTRICT`) so history is not wiped by mistake.
+
+**Status changes over time:**
+
+```text
+RESERVED, then CONFIRMED, then FULFILLED   (ship step optional; FULFILLED not auto-set yet)
+RESERVED, then RELEASED or EXPIRED         (fail, cancel, or timeout)
+CONFIRMED, then RESTOCKED                  (refund)
+```
+
+**After successful payment the numbers look like this:**
 
 ```text
 total_stock = 90
 reserved_stock = 0
-reservation.status = CONFIRMED   -- UPDATE, not DELETE
+reservation.status = CONFIRMED   (UPDATE the row; do not DELETE it)
 reservation.confirmed_at = now()
 ```
 
-**Lifecycle:**
+### Ledger (`StockLedgerEntry`)
 
-```text
-RESERVED → CONFIRMED → FULFILLED   (optional ship step; FULFILLED not auto-set yet)
-RESERVED → RELEASED | EXPIRED
-CONFIRMED → RESTOCKED              (refund webhook)
-```
+Append-only log: `RESERVE`, `EXTEND`, `CONFIRM`, `RELEASE`, `EXPIRE`, `RESTOCK` (older rows may say `COMMIT` or `RESTORE_REFUND`).
 
-Archive old reservation rows with cron later if the table grows large.
+### Example: 100 in warehouse, customer reserves 10
 
-### Ledger (`StockLedgerEntry` / `inventory_transactions`)
+| | Before pay | After pay |
+| - | ---------- | --------- |
+| On hand (`stock`) | 100 | **90** |
+| Reserved | 10 | **0** |
+| Available | 90 | **90** |
 
-Append-only `reason`: `RESERVE` | `EXTEND` | `CONFIRM` | `RELEASE` | `EXPIRE` | `RESTOCK`  
-(Legacy: `COMMIT`, `RESTORE_REFUND`.)
+### Step by step
 
-### Numeric example (qty 10 reserved from 100 on-hand)
-
-| Type | Before pay | After pay success |
-| ---- | ---------- | ----------------- |
-| Physical stock (`total_stock`) | 100 | **90** |
-| Reserved (`reserved_stock`) | 10 | **0** |
-| Available (`total_stock - reserved_stock`) | 90 | **90** |
-
-### Reserve stock flow
-
-| Step | Event / API | Product row | Reservation row |
-| ---- | ----------- | ----------- | --------------- |
-| **1. Create order** | `OrderCreated` → `POST /orders` | `reserved_stock` ↑, `available` ↓ | `RESERVED` |
-| **2. Payment pending** | `payment-intent` / `PROCESSING` | unchanged | stays `RESERVED` (extend `expiresAt`) |
-| **3. Payment success** | `PaymentCompleted` → `PAID` | `total_stock` ↓, `reserved_stock` ↓ | `RESERVED` → **`CONFIRMED`** |
-| **4. Failed / cancelled** | `PaymentFailed` | `reserved_stock` ↓ | `RESERVED` → **`RELEASED`** |
-| **4b. TTL expired** | `PaymentExpired` sweep | `reserved_stock` ↓ | `RESERVED` → **`EXPIRED`** |
+| Step | What happens | Product row | Reservation |
+| ---- | ------------ | ----------- | ----------- |
+| 1. Create order | `POST /orders` with items | Reserved goes up, available goes down | `RESERVED` |
+| 2. Paying | `payment-intent`, order `PROCESSING` | No change | Stays `RESERVED`; TTL extended |
+| 3. Paid | Webhook or capture | On hand down, reserved down | `CONFIRMED` |
+| 4. Failed / cancelled | Payment failed | Reserved down | `RELEASED` |
+| 4b. Hold timed out | Sweep job | Reserved down | `EXPIRED` |
 
 ```mermaid
 stateDiagram-v2
@@ -159,43 +146,26 @@ stateDiagram-v2
   EXPIRED --> [*]: row kept
 ```
 
-### Event-driven mapping (this codebase)
+### Code that moves stock
 
-| Recommended event | Implementation |
-| ----------------- | -------------- |
-| `OrderCreated` → `ReserveStock` | `InventoryService.reserveAtCheckout` |
-| `PaymentCompleted` → `ConfirmReservation` + `DeductInventory` | `InventoryService.commitForOrder` |
-| `PaymentExpired` / failed → `ReleaseReservation` | `InventoryService.releaseForOrder` |
+| Business moment | Service method |
+| --------------- | -------------- |
+| Order created with items | `InventoryService.reserveAtCheckout` |
+| Payment succeeded | `InventoryService.commitForOrder` |
+| Payment failed, expired, or cancelled | `InventoryService.releaseForOrder` |
+| Refund | `InventoryService.restoreForRefund` |
 
-### When stock changes (API index)
+### Safety checks
 
-| Step | API / event | Inventory action |
-| ---- | ----------- | ------------------ |
-| 1 | `POST /orders` with `items` | **Reserve** — `reservedStock` increases, order `UNPAID` |
-| 2 | `POST /orders/:id/payment-intent` | **Extend** TTL (no second reserve) |
-| 3 | Webhook / capture → `PAID` | **Commit** — `stock` and `reservedStock` decrease |
-| 4 | `FAILED` / `CANCELLED` / `EXPIRED` | **Release** — `reservedStock` decreases |
-| 5 | Refund webhook → `REFUNDED` | **Restock** — `stock` increases; reservation → `RESTOCKED` |
+- SQL only reserves if enough available stock
+- `SELECT … FOR UPDATE` on product rows inside transactions
+- Redis lock per SKU when multiple API instances run
+- SKUs locked in sorted order (avoids deadlocks)
+- DB checks: stock and reserved never negative; reserved never above stock
+- App checks invariants after each change
+- Audit API: `GET /inventory/orders/:orderId/reservations`
 
-### Data stored
-
-- **Product** — `stock` (total_stock), `reservedStock`, `version` (optimistic lock)
-- **OrderLineItem** — `sku`, `quantity`, `unitPrice` per order
-- **StockReservation** — `RESERVED` / `CONFIRMED` / `RELEASED` / `EXPIRED`, `expiresAt`, `confirmedAt`, `productId`
-- **StockLedgerEntry** — append-only audit trail
-
-### Safety mechanisms (production)
-
-- Atomic reserve: `UPDATE … SET reservedStock = reservedStock + qty WHERE stock - reservedStock >= qty`
-- `SELECT … FOR UPDATE` per SKU inside transactions
-- Redis lock: `lock:inventory:sku:{sku}` (multi-instance)
-- SKUs locked in sorted order (deadlock avoidance)
-- DB `CHECK`: `stock >= 0`, `reservedStock >= 0`, `reservedStock <= stock`
-- DB `CHECK`: reservation `status` ∈ `RESERVED` … `RESTOCKED`
-- App `assertProductInventoryInvariant` after reserve / confirm / release / restock
-- Ops API: `GET /inventory/orders/:orderId/reservations` (full audit row + timestamps)
-
-### Example create order body
+### Sample order body
 
 ```json
 {
@@ -208,116 +178,117 @@ stateDiagram-v2
 }
 ```
 
-Demo SKUs (from `backend/prisma/seeder/product.seeder.ts`, run `npm run db:seed`): `wireless-mouse`, `usb-c-cable`, `laptop-stand`.
+Demo SKUs after `npm run db:seed`: `wireless-mouse`, `usb-c-cable`, `laptop-stand`.
 
 ---
 
-## Payment steps
+## Payment steps (detail)
 
 ### 1) Create order
 
-- Validate body (`amount`, optional `items`)
-- If `items` present, `amount` must match line totals
-- Persist order as **`UNPAID`**
-- Reserve inventory when line items exist
+- Validate `amount` and optional `items`
+- If `items` are sent, `amount` must match line totals
+- Save order as `UNPAID`
+- Reserve stock when line items exist
 
 ### 2) Create payment intent
 
 - Redis lock: `lock:order:intent:{orderId}`
-- Row lock order; extend reservation TTL
-- Set status **`PROCESSING`**; enqueue `create-payment-intent`
-- Worker calls PayPal (or mock) and stores `paypalOrderId` + `approvalUrl`
+- Lock order row; extend reservation TTL
+- Set order to `PROCESSING`; enqueue `create-payment-intent`
+- Worker talks to PayPal or mock; saves `paypalOrderId` and `approvalUrl`
 
 ### 3) Customer pays
 
-- Frontend polls `GET /orders/:id` for `approvalUrl` / status
-- Gateway sends webhook to `POST /webhooks/paypal`
+- UI polls `GET /orders/:id`
+- Gateway calls `POST /webhooks/paypal`
 
-### 4) Async status update
+### 4) Apply result (async)
 
-- Verify signature → idempotency check → save `WebhookEvent` → enqueue `process-webhook`
-- Worker updates order status and inventory in one transaction
+- Verify signature, check idempotency, save `WebhookEvent`, enqueue `process-webhook`
+- Worker updates order + inventory in one transaction
 
 ---
 
 ## Webhooks
 
-### Intake (HTTP)
+### HTTP handler (fast path)
 
-1. **Verify signature** — invalid → `400`
-2. **Idempotency** — if `eventId` already in `ProcessedEvent` → `200` (no-op)
-3. **Persist** `WebhookEvent` + enqueue job → **`200`** so the provider stops retrying
+1. **Verify signature** — bad signature returns `400`
+2. **Idempotency** — if `eventId` was already processed, return `200` and do nothing
+3. **Save event and enqueue** — return `200` so PayPal stops retrying
 
-Idempotency logic lives under `modules/webhook` (with `modules/idempotency` helpers).
+Logic lives in `modules/webhook` and `infrastructure/idempotency`.
 
-### Processing (worker)
+### Worker (slow path)
 
-Example event patterns handled:
+Maps gateway events to order status, for example:
 
-- Success: `SUCCEEDED`, `COMPLETED`
-- Failure: `FAILED`
+- Success: `SUCCEEDED`, `COMPLETED` then `PAID` and commit stock
+- Failure: `FAILED` then release stock
 - Cancel: `CANCELLED`, `VOIDED`, `DENIED`
-- Refund: `REFUND` in type or status → `REFUNDED` + restore stock
+- Refund: type or status contains `REFUND` then `REFUNDED` and restock
 
-Providers typically retry with exponential backoff until they receive `200`.
+PayPal will retry until it gets `200`.
 
 ---
 
 ## Background jobs
 
-| Job | Purpose |
-| --- | ------- |
-| `create-payment-intent` | Create gateway checkout |
-| `process-webhook` | Apply payment result + inventory |
+| Job | What it does |
+| --- | ------------ |
+| `create-payment-intent` | Open checkout at gateway |
+| `process-webhook` | Apply payment result and inventory |
 | `capture-payment` | Manual capture fallback |
-| `expire-orders-sweep` | `PROCESSING` → `EXPIRED` + release stock |
-| `expire-reservations-sweep` | Release `RESERVED` reservations past `expiresAt` → `EXPIRED` |
-| `expire-unpaid-orders-sweep` | `UNPAID` → `EXPIRED` when hold expired |
-| `reconcile-orders-sweep` | Align stuck orders with gateway status |
-| `mock-capture-success` | Mock mode auto-capture |
+| `expire-orders-sweep` | `PROCESSING` orders past TTL become `EXPIRED`; release stock |
+| `expire-reservations-sweep` | Old `RESERVED` rows become `EXPIRED` |
+| `expire-unpaid-orders-sweep` | Abandoned `UNPAID` orders expire |
+| `reconcile-orders-sweep` | Fix orders stuck in `PROCESSING` vs gateway |
+| `mock-capture-success` | Auto-finish mock payments |
 
-Workers live in `backend/src/modules/queue/processors/`. Details: [queue module README](../backend/src/modules/queue/README.md).
-
----
-
-## Idempotency & locks
-
-| Concern | Mechanism |
-| ------- | --------- |
-| Duplicate payment intent | `lock:order:intent:{orderId}` |
-| Duplicate webhook | `ProcessedEvent` + `lock:webhook:event:{eventId}` |
-| Lost updates | `SELECT … FOR UPDATE` on `Order` / `Product` |
-| Duplicate queue work | BullMQ `jobId` (e.g. `create-{orderId}`) |
-| Duplicate reservation | `reservationKey` = `reserve:{orderId}:{sku}` |
+Workers: `backend/src/infrastructure/bullmq/workers/`.  
+More: [bullmq README](../backend/src/infrastructure/bullmq/README.md), [queue README](../backend/src/infrastructure/queue/README.md).
 
 ---
 
-## Failure & refund
+## Idempotency and locks
 
-| Event | Order status | Inventory |
-| ----- | -------------- | --------- |
-| Payment failed | `FAILED` | Release |
-| Cancelled / voided | `CANCELLED` | Release |
-| Processing timeout | `EXPIRED` | Release |
-| Reservation TTL | (order may stay `UNPAID` then `EXPIRED`) | Release |
-| Full refund webhook | `REFUNDED` | Restore on-hand |
-
-User can retry payment from `FAILED` / `EXPIRED` / `CANCELLED` via a new `payment-intent` (extends or re-reserves as needed).
+| Problem | Fix |
+| ------- | --- |
+| Two payment intents for same order | `lock:order:intent:{orderId}` |
+| Same webhook twice | `ProcessedEvent` + `lock:webhook:event:{eventId}` |
+| Two writers on same row | `SELECT … FOR UPDATE` |
+| Duplicate queue job | Stable BullMQ `jobId` (e.g. `create-{orderId}`) |
+| Double reserve same line | `reservationKey` = `reserve:{orderId}:{sku}` |
 
 ---
 
-## Environment variables
+## When things go wrong
 
-Inventory-related (see `backend/.env.example`):
+| Situation | Order | Stock |
+| --------- | ----- | ----- |
+| Payment failed | `FAILED` | Release hold |
+| Cancelled / voided | `CANCELLED` | Release hold |
+| Payment timed out | `EXPIRED` | Release hold |
+| Reservation TTL | Order may become `EXPIRED` | Release hold |
+| Full refund | `REFUNDED` | Put quantity back on hand |
+
+Customer can try again from `FAILED`, `EXPIRED`, or `CANCELLED` with a new `payment-intent`.
+
+---
+
+## Related env vars
+
+From `backend/.env.example`:
 
 | Variable | Default | Role |
 | -------- | ------- | ---- |
-| `STOCK_RESERVATION_TTL_MS` | `900000` | Checkout hold (15 min) |
-| `STOCK_RESERVATION_SWEEP_EVERY_MS` | `30000` | Reservation expiry sweep interval |
-| `ORDER_PROCESSING_EXPIRE_MS` | `900000` | Payment-in-progress TTL |
-| `ORDER_EXPIRE_SWEEP_EVERY_MS` | `60000` | Processing expiry sweep |
-| `UNPAID_ORDER_EXPIRE_MS` | `1800000` | Abandoned unpaid order TTL |
-| `UNPAID_ORDER_SWEEP_EVERY_MS` | `60000` | Unpaid cleanup sweep |
+| `STOCK_RESERVATION_TTL_MS` | `900000` | How long checkout hold lasts (15 min) |
+| `STOCK_RESERVATION_SWEEP_EVERY_MS` | `30000` | How often to expire old holds |
+| `ORDER_PROCESSING_EXPIRE_MS` | `900000` | Max time in `PROCESSING` |
+| `ORDER_EXPIRE_SWEEP_EVERY_MS` | `60000` | How often to expire stuck processing |
+| `UNPAID_ORDER_EXPIRE_MS` | `1800000` | Abandoned cart TTL |
+| `UNPAID_ORDER_SWEEP_EVERY_MS` | `60000` | How often to clean unpaid orders |
 
 ---
 
@@ -326,7 +297,8 @@ Inventory-related (see `backend/.env.example`):
 From repo root:
 
 ```bash
-docker compose up --build
+cd backend && npm run start:dev
+cd apps/web && npm run dev
 ```
 
 From `backend/`:
@@ -334,7 +306,7 @@ From `backend/`:
 ```bash
 npm run prisma:generate
 npm run prisma:deploy
-npm run db:seed          # prisma/seeder/main.ts
+npm run db:seed
 npm run lint
 npm test
 ```

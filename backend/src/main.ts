@@ -2,8 +2,8 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module';
-import { HttpExceptionFilter } from './shared/filters/http-exception.filter';
-import configuration from './config/configuration';
+import { HttpExceptionFilter } from './common/shared/filters/http-exception.filter';
+import configuration from './common/config/configuration';
 
 async function bootstrap(): Promise<void> {
   const config = configuration();

@@ -72,9 +72,12 @@ function main() {
   if (fs.existsSync(moduleDir)) die(`Module already exists: ${moduleDir}`);
 
   /** ----- Create module folders ----- **/
-  ensureDir(path.join(moduleDir, 'application', 'commands'));
-  ensureDir(path.join(moduleDir, 'application', 'handlers'));
-  ensureDir(path.join(moduleDir, 'cqrs'));
+  ensureDir(path.join(moduleDir, 'dto'));
+  ensureDir(path.join(moduleDir, 'enums'));
+  ensureDir(path.join(moduleDir, 'helpers'));
+  ensureDir(path.join(moduleDir, 'cqrs', 'commands'));
+  ensureDir(path.join(moduleDir, 'cqrs', 'queries'));
+  ensureDir(path.join(moduleDir, 'cqrs', 'handlers'));
 
   /** ----- Create module files ----- **/
   writeFileSafe(
@@ -92,14 +95,6 @@ function main() {
   );
 
   writeFileSafe(
-    path.join(moduleDir, `${name}.repository.ts`),
-    `import { Injectable } from '@nestjs/common';\n\n` +
-      comment(`Handle ${name} database access.`) +
-      `@Injectable()\n` +
-      `export class ${classBase}Repository {}\n`,
-  );
-
-  writeFileSafe(
     path.join(moduleDir, `${name}.controller.ts`),
     `import { Controller, Get } from '@nestjs/common';\n\n` +
       comment(`Handle ${name} module endpoints.`) +
@@ -114,7 +109,7 @@ function main() {
   );
 
   writeFileSafe(
-    path.join(moduleDir, 'application', 'commands', `${name}.command.ts`),
+    path.join(moduleDir, 'cqrs', 'commands', `${name}.command.ts`),
     `export class ${classBase}Command {\n` +
       `  ${comment(`${classBase} command payload`, '  ').trimEnd()}\n` +
       `  constructor() {}\n` +
@@ -122,29 +117,24 @@ function main() {
   );
 
   writeFileSafe(
-    path.join(moduleDir, 'application', 'handlers', `${name}.handler.ts`),
+    path.join(moduleDir, 'cqrs', 'handlers', `${name}.handler.ts`),
     `import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';\n\n` +
-      `import { ${classBase}Repository } from '../../${name}.repository';\n` +
       `import { ${classBase}Service } from '../../${name}.service';\n` +
       `import { ${classBase}Command } from '../commands/${name}.command';\n\n` +
       comment(`Handle ${name} command.`) +
       `@CommandHandler(${classBase}Command)\n` +
       `export class ${classBase}Handler implements ICommandHandler<${classBase}Command> {\n` +
-      `  constructor(\n` +
-      `    private readonly service: ${classBase}Service,\n` +
-      `    private readonly repository: ${classBase}Repository,\n` +
-      `  ) {}\n\n` +
+      `  constructor(private readonly service: ${classBase}Service) {}\n\n` +
       `  async execute(command: ${classBase}Command): Promise<void> {\n` +
       `    void command;\n` +
       `    void this.service;\n` +
-      `    void this.repository;\n` +
       `  }\n` +
       `}\n`,
   );
 
   writeFileSafe(
     path.join(moduleDir, 'cqrs', 'index.ts'),
-    `import { ${classBase}Handler } from '../application/handlers/${name}.handler';\n\n` +
+    `import { ${classBase}Handler } from './handlers/${name}.handler';\n\n` +
       `export const CommandHandlers = [${classBase}Handler];\n` +
       `export const QueryHandlers: never[] = [];\n` +
       `export const EventHandlers: never[] = [];\n`,
@@ -156,13 +146,12 @@ function main() {
       `import { CqrsModule } from '@nestjs/cqrs';\n\n` +
       `import { CommandHandlers, EventHandlers, QueryHandlers } from './cqrs';\n` +
       `import { ${classBase}Controller } from './${name}.controller';\n` +
-      `import { ${classBase}Repository } from './${name}.repository';\n` +
       `import { ${classBase}Service } from './${name}.service';\n\n` +
       comment(`Configure ${name} module.`) +
       `@Module({\n` +
       `  imports: [CqrsModule],\n` +
       `  controllers: [${classBase}Controller],\n` +
-      `  providers: [${classBase}Service, ${classBase}Repository, ...EventHandlers, ...CommandHandlers, ...QueryHandlers],\n` +
+      `  providers: [${classBase}Service, ...EventHandlers, ...CommandHandlers, ...QueryHandlers],\n` +
       `  exports: [${classBase}Service],\n` +
       `})\n` +
       `export class ${classBase}Module {}\n`,
