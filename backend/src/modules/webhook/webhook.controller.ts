@@ -7,8 +7,10 @@ import {
   type RawBodyRequest,
 } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
+import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 
+import configuration from '../../common/config/configuration';
 import type { ReceiveWebhookResponseDto } from './dto/webhook.dto';
 import {
   ReceiveWebhookCommand,
@@ -18,6 +20,12 @@ import { WEBHOOK_ROUTE } from './webhook.constant';
 
 /** ----- Handle webhook controller class ----- **/
 @Controller(WEBHOOK_ROUTE.PAYPAL)
+@Throttle({
+  default: {
+    limit: () => configuration().rateLimit.webhookLimit,
+    ttl: () => configuration().rateLimit.webhookTtlMs,
+  },
+})
 export class WebhookController {
   /** ----- Handle constructor dependency wiring ----- **/
   constructor(private readonly commandBus: CommandBus) {}

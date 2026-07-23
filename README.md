@@ -163,7 +163,7 @@ Deeper dive: [docs/paymentflow.md](./docs/paymentflow.md) · [inventory module](
 
 | Method | Path                                      | What it does                    |
 | ------ | ----------------------------------------- | ------------------------------- |
-| `POST` | `/orders`                                 | Create order (optional `items`) |
+| `POST` | `/orders`                                 | Create order (`Idempotency-Key` optional) |
 | `POST` | `/orders/:id/payment-intent`              | Start or retry checkout         |
 | `GET`  | `/orders/:id`                             | Order status and events         |
 | `GET`  | `/orders`                                 | List orders (cursor pagination) |
@@ -173,7 +173,7 @@ Deeper dive: [docs/paymentflow.md](./docs/paymentflow.md) · [inventory module](
 | `GET`  | `/inventory/orders/:orderId/reservations` | Reservation history             |
 | `GET`  | `/ops/metrics`                            | Queue health                    |
 | `GET`  | `/ops/dlq`                                | Failed jobs                     |
-| `POST` | `/ops/dlq/:jobId/replay`                  | Retry one failed job            |
+| `POST` | `/ops/dlq/:jobId/replay?queue=`           | Replay a failed job             |
 
 **Sample create-order body:**
 
@@ -225,10 +225,12 @@ Retries: payment/webhook jobs try ~5 times with backoff; sweeps try ~3 times wit
 
 | Problem                    | How we handle it                          |
 | -------------------------- | ----------------------------------------- |
+| Double create order        | Optional `Idempotency-Key` header + unique DB key |
 | Double payment intent      | Redis lock per order                      |
 | Duplicate webhook          | `ProcessedEvent` + lock per event id      |
 | Two requests, one row      | `SELECT … FOR UPDATE` via `RowLockService` |
 | Duplicate queue job        | Stable BullMQ `jobId`                     |
+| Permanent vs transient job | 4xx → `UnrecoverableError` (no retry); 5xx/network → retry |
 | Double reserve same line   | `reservationKey` per order + SKU          |
 | Hot SKU                    | Redis lock per SKU                        |
 
@@ -285,10 +287,22 @@ Schema and seeds: [backend/prisma/README.md](./backend/prisma/README.md). Runtim
 
 ## When jobs fail
 
-- After max retries, jobs land in the **dead-letter queue**.
-- `GET /ops/dlq` — see what broke.
-- `POST /ops/dlq/:jobId/replay` — try again.
-- `GET /ops/metrics` — queue depth and health.
+- After max retries, failed jobs stay in BullMQ (dead-letter set; keep last `BULLMQ_REMOVE_ON_FAIL`).
+- `GET /ops/dlq` — list failed jobs (`?limit=50&queue=audit-queue` optional).
+- `POST /ops/dlq/:jobId/replay?queue=audit-queue` — retry one failed job.
+- `GET /ops/metrics` — waiting / active / delayed / failed counts.
+
+## Rate limiting
+
+Global Nest throttler (tracker = `x-api-key` header, else client IP):
+
+| Scope | Env | Default |
+| ----- | --- | ------- |
+| All routes | `RATE_LIMIT_LIMIT` / `RATE_LIMIT_TTL_MS` | 120 / 60s |
+| Create order, payment-intent, capture | `RATE_LIMIT_PAYMENT_*` | 30 / 60s |
+| PayPal webhook | `RATE_LIMIT_WEBHOOK_*` | 180 / 60s |
+
+`/ops/*` skips throttling. Over limit returns HTTP `429`.
 
 ---
 

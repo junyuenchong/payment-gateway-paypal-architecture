@@ -24,6 +24,7 @@ import type {
   ReconcileOrdersSweepJob,
 } from '../../queue/dto/queue-job.dto';
 import { JOBS, type JobName } from '../../queue/enums/queue-job.enum';
+import { toQueueJobError } from '../../queue/helpers/job-retry.helper';
 
 type AnyJobData =
   | CreatePaymentIntentJob
@@ -72,6 +73,6 @@ export async function executeQueueJob(
     const normalized = toError(error, 'Queue worker execution failed');
     log.error(`Queue job failed: ${job.name ?? 'undefined'}`);
     log.error(normalized.stack ?? normalized.message);
-    throw normalized;
+    throw toQueueJobError(error, 'Queue worker execution failed');
   }
 }

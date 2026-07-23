@@ -59,6 +59,7 @@ BullMQ queue **names** also come from env — see `infrastructure/bullmq/bullmq.
 | `order` | processing TTLs and sweeps |
 | `inventory` | reservation TTLs and sweeps |
 | `reconciliation` | sweep interval, batch size, lookback |
+| `rateLimit` | global / payment / webhook TTL and limits |
 
 Variable names match `backend/.env.example`.
 

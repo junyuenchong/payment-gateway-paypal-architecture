@@ -357,6 +357,20 @@ export default function HomePage() {
    * ------------------------------------------------------
    */
   const handlePayAgain = async (orderId: string) => {
+    const row = paymentRows.find((item) => item.orderId === orderId);
+    const status = (row?.liveStatus || row?.intentStatus || '')
+      .trim()
+      .toUpperCase();
+    if (
+      status === 'PAID' ||
+      status === 'PROCESSING' ||
+      status === 'REFUNDING' ||
+      status === 'REFUNDED' ||
+      status === 'PARTIALLY_REFUNDED'
+    ) {
+      return;
+    }
+
     setCheckoutError(undefined);
     setPayingAgainOrderId(orderId);
     try {

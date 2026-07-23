@@ -55,4 +55,12 @@ export type AppConfiguration = {
     batchSize: number;
     lookbackMs: number;
   };
+  rateLimit: {
+    ttlMs: number;
+    limit: number;
+    paymentTtlMs: number;
+    paymentLimit: number;
+    webhookTtlMs: number;
+    webhookLimit: number;
+  };
 };

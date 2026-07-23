@@ -1,10 +1,20 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import { Throttle } from '@nestjs/throttler';
 import {
   CursorPaginationQueryDtoSchema,
   type CursorPaginationQueryDto,
 } from '../../common/shared/dto/cursor-pagination-query.dto';
 import { ZodValidationPipe } from '../../common/shared/pipes/zod-validation.pipe';
+import configuration from '../../common/config/configuration';
 import { ScheduleCapturePaymentCommand } from './cqrs/commands/schedule-capture-payment.command';
 import { CreateOrderCommand } from './cqrs/commands/create-order.command';
 import { CreatePaymentIntentCommand } from './cqrs/commands/create-payment-intent.command';
@@ -17,6 +27,14 @@ import {
   type OrderIdParamInput,
 } from './dto/order.input';
 
+/** ----- Stricter throttle for payment write endpoints. ----- **/
+const paymentThrottle = {
+  default: {
+    limit: () => configuration().rateLimit.paymentLimit,
+    ttl: () => configuration().rateLimit.paymentTtlMs,
+  },
+} as const;
+
 /** ----- Handle order controller class ----- **/
 @Controller('orders')
 export class OrderController {
@@ -27,8 +45,10 @@ export class OrderController {
 
   /** ----- Create Order ----- **/
   @Post()
+  @Throttle(paymentThrottle)
   create(
     @Body(new ZodValidationPipe(CreateOrderInputSchema)) dto: CreateOrderInput,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
     return this.commandBus.execute(
       new CreateOrderCommand(
@@ -36,6 +56,7 @@ export class OrderController {
         dto.currency,
         dto.externalRef,
         dto.items,
+        idempotencyKey?.trim() || undefined,
       ),
     );
   }
@@ -62,6 +83,7 @@ export class OrderController {
 
   /** ----- Create Payment Intent ----- **/
   @Post(':id/payment-intent')
+  @Throttle(paymentThrottle)
   paymentIntent(
     @Param(new ZodValidationPipe(OrderIdParamInputSchema))
     params: OrderIdParamInput,
@@ -71,6 +93,7 @@ export class OrderController {
 
   /** ----- Capture Payment ----- **/
   @Post(':id/capture')
+  @Throttle(paymentThrottle)
   capture(
     @Param(new ZodValidationPipe(OrderIdParamInputSchema))
     params: OrderIdParamInput,

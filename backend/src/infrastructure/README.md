@@ -17,6 +17,7 @@ infrastructure/
 ├── bullmq/              # Queue registration + workers
 ├── locks/               # Distributed locks across app instances
 ├── idempotency/         # “Already processed this webhook?”
+├── ops/                 # DLQ list/replay + queue metrics
 ├── payment-gateway/     # PayPal + mock checkout
 ├── reconciliation/      # Fix orders stuck in PROCESSING
 └── queue/               # Enqueue jobs + map them to domain handlers
@@ -25,7 +26,7 @@ infrastructure/
 | Level | Folders | CQRS? |
 |-------|---------|-------|
 | Connections | `redis`, `bullmq` | No — just wiring |
-| Adapters | `locks`, `idempotency`, `payment-gateway`, `reconciliation` | Usually no — service + helpers |
+| Adapters | `locks`, `idempotency`, `ops`, `payment-gateway`, `reconciliation` | Usually no — service + helpers |
 | Job routing | `queue` | Yes — one handler per BullMQ job name |
 
 Row-level locks inside a transaction: `database/prisma/locks/row-lock.service.ts`.
@@ -77,7 +78,7 @@ Row-level locks inside a transaction: `database/prisma/locks/row-lock.service.ts
 Defined in `modules/feature-modules.ts`:
 
 1. `RedisIntegrationModule`, then `BullMqIntegrationModule`
-2. `LocksModule`, `IdempotencyModule`, `PaymentGatewayModule`
+2. `LocksModule`, `IdempotencyModule`, `PaymentGatewayModule`, `OpsModule`
 3. Domain: Inventory, Order, Payment, Webhook
 4. `QueueModule`, `ReconciliationModule` (workers need handlers above)
 
@@ -91,6 +92,7 @@ Defined in `modules/feature-modules.ts`:
 | [bullmq](./bullmq/README.md) | Queues & workers |
 | [locks](./locks/README.md) | Distributed locks |
 | [idempotency](./idempotency/README.md) | Webhook deduplication |
+| [ops](./ops/README.md) | DLQ + queue metrics |
 | [payment-gateway](./payment-gateway/README.md) | PayPal / mock |
 | [reconciliation](./reconciliation/README.md) | Gateway vs DB sweeps |
 | [queue](./queue/README.md) | Enqueue API & job handlers |

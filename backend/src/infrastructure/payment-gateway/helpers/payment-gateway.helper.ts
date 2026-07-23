@@ -47,8 +47,16 @@ export function toPayPalException(
   const message = rootMessage ?? 'PayPal request failed';
   const status = axiosError.response?.status;
 
-  if (status && status >= 400 && status < 500) {
+  // 4xx (except 408/429) = permanent client/provider rejection — not retryable
+  if (
+    status &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 408 &&
+    status !== 429
+  ) {
     return new BadRequestException(`PayPal rejected request: ${message}`);
   }
+  // Network blips, 5xx, 408, 429 = transient
   return new BadGatewayException(message);
 }

@@ -47,6 +47,46 @@ function statusTone(raw: string): string {
 
 /**
  * ------------------------------------------------------
+ * Normalize status for comparisons (API codes or labels)
+ * ------------------------------------------------------
+ */
+function normalizeStatus(raw: string | undefined | null): string {
+  return (raw ?? '').trim().toUpperCase();
+}
+
+/**
+ * ------------------------------------------------------
+ * Show Pay Again only for unpaid / failed / cancelled / expired
+ * ------------------------------------------------------
+ */
+function shouldShowPayAgain(row: PaymentRow): boolean {
+  const live = normalizeStatus(row.liveStatus);
+  const intent = normalizeStatus(row.intentStatus);
+
+  // If either column is already paid / processing / refund — hide
+  for (const status of [live, intent]) {
+    if (
+      status === 'PAID' ||
+      status === 'PROCESSING' ||
+      status === 'REFUNDING' ||
+      status === 'REFUNDED' ||
+      status === 'PARTIALLY_REFUNDED'
+    ) {
+      return false;
+    }
+  }
+
+  const status = live || intent;
+  return (
+    status === 'UNPAID' ||
+    status === 'FAILED' ||
+    status === 'CANCELLED' ||
+    status === 'EXPIRED'
+  );
+}
+
+/**
+ * ------------------------------------------------------
  * Payment History Table Props
  * ------------------------------------------------------
  */
@@ -102,77 +142,79 @@ export function PaymentHistoryTable({
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => (
-                  <tr key={row.orderId} className={uiTokens.tableMobileRow}>
-                    <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
-                      <span className="mr-2 text-slate-400 md:hidden">
-                        Order ID:
-                      </span>
-                      {row.orderId}
-                    </td>
-                    <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
-                      <span className="mr-2 text-slate-400 md:hidden">
-                        Provider:
-                      </span>
-                      {row.provider}
-                    </td>
-                    <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
-                      <span className="mr-2 text-slate-400 md:hidden">
-                        Amount:
-                      </span>
-                      {row.amount.toFixed(2)}
-                    </td>
-                    <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
-                      <span className="mr-2 text-slate-400 md:hidden">
-                        Currency:
-                      </span>
-                      {row.currency}
-                    </td>
-                    <td className="block px-1 py-1 md:table-cell md:min-w-[150px] md:px-3 md:py-2">
-                      <span className="mr-2 text-slate-400 md:hidden">
-                        Intent:
-                      </span>
-                      <span
-                        className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-base ${statusTone(row.intentStatus)}`}
-                      >
-                        {formatMarketplaceStatus(row.intentStatus)}
-                      </span>
-                    </td>
-                    <td className="block px-1 py-1 md:table-cell md:min-w-[150px] md:px-3 md:py-2">
-                      <span className="mr-2 text-slate-400 md:hidden">
-                        Live:
-                      </span>
-                      <span
-                        className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-base ${statusTone(row.liveStatus)}`}
-                      >
-                        {formatMarketplaceStatus(row.liveStatus)}
-                      </span>
-                    </td>
-                    <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
-                      <span className="mr-2 text-slate-400 md:hidden">
-                        Updated:
-                      </span>
-                      {row.updatedAt}
-                    </td>
-                    <td className="block px-1 py-2 md:sticky md:right-0 md:z-10 md:w-[180px] md:table-cell md:bg-slate-900/90 md:px-3 md:py-2">
-                      {row.liveStatus === 'PAID' ||
-                      row.liveStatus === 'REFUNDED' ||
-                      row.liveStatus === 'PARTIALLY_REFUNDED' ? (
-                        <span className="text-slate-500">-</span>
-                      ) : (
-                        <ActionButton
-                          onClick={() => onPayAgain(row.orderId)}
-                          disabled={payingOrderId === row.orderId}
-                          className="h-10 px-4 text-base sm:text-base"
+                rows.map((row) => {
+                  const showPayAgain = shouldShowPayAgain(row);
+
+                  return (
+                    <tr key={row.orderId} className={uiTokens.tableMobileRow}>
+                      <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
+                        <span className="mr-2 text-slate-400 md:hidden">
+                          Order ID:
+                        </span>
+                        {row.orderId}
+                      </td>
+                      <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
+                        <span className="mr-2 text-slate-400 md:hidden">
+                          Provider:
+                        </span>
+                        {row.provider}
+                      </td>
+                      <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
+                        <span className="mr-2 text-slate-400 md:hidden">
+                          Amount:
+                        </span>
+                        {row.amount.toFixed(2)}
+                      </td>
+                      <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
+                        <span className="mr-2 text-slate-400 md:hidden">
+                          Currency:
+                        </span>
+                        {row.currency}
+                      </td>
+                      <td className="block px-1 py-1 md:table-cell md:min-w-[150px] md:px-3 md:py-2">
+                        <span className="mr-2 text-slate-400 md:hidden">
+                          Intent:
+                        </span>
+                        <span
+                          className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-base ${statusTone(row.intentStatus)}`}
                         >
-                          {payingOrderId === row.orderId
-                            ? 'Opening...'
-                            : 'Pay Again'}
-                        </ActionButton>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                          {formatMarketplaceStatus(row.intentStatus)}
+                        </span>
+                      </td>
+                      <td className="block px-1 py-1 md:table-cell md:min-w-[150px] md:px-3 md:py-2">
+                        <span className="mr-2 text-slate-400 md:hidden">
+                          Live:
+                        </span>
+                        <span
+                          className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-base ${statusTone(row.liveStatus)}`}
+                        >
+                          {formatMarketplaceStatus(row.liveStatus)}
+                        </span>
+                      </td>
+                      <td className="block px-1 py-1 md:table-cell md:px-3 md:py-2">
+                        <span className="mr-2 text-slate-400 md:hidden">
+                          Updated:
+                        </span>
+                        {row.updatedAt}
+                      </td>
+                      <td className="block px-1 py-2 md:sticky md:right-0 md:z-10 md:w-[180px] md:table-cell md:bg-slate-900/90 md:px-3 md:py-2">
+                        {showPayAgain ? (
+                          <ActionButton
+                            onClick={() => onPayAgain(row.orderId)}
+                            disabled={payingOrderId === row.orderId}
+                            className="h-10 px-4 text-base sm:text-base"
+                          >
+                            {payingOrderId === row.orderId
+                              ? 'Opening...'
+                              : 'Pay Again'}
+                          </ActionButton>
+                        ) : (
+                          <span className="text-slate-500">-</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

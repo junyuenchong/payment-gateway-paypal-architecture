@@ -1,6 +1,5 @@
 /** ----- Handle create payment intent job.handler ----- **/
 import { CommandBus, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
-import { randomUUID } from 'crypto';
 
 import { AppConfigService } from '../../../../common/config';
 import { QueueService } from '../../queue.service';
@@ -10,7 +9,7 @@ import {
   type CreateCheckoutOrderResult,
 } from '../../../../modules/payment/cqrs/commands/payment-gateway.command';
 
-/** ----- Handle creat aymen nten o andler class ----- **/
+/** ----- Handle create payment intent job. ----- **/
 @CommandHandler(CreatePaymentIntentJobCommand)
 export class CreatePaymentIntentJobHandler implements ICommandHandler<CreatePaymentIntentJobCommand> {
   constructor(
@@ -32,19 +31,6 @@ export class CreatePaymentIntentJobHandler implements ICommandHandler<CreatePaym
 
     if (!snapshot?.shouldWork) return;
 
-    // Mock mode: create a fake gateway order id and schedule a signed mock webhook.
-    if (mockEnabled) {
-      const paypalOrderId = `MOCK-ORDER-${randomUUID()}`;
-
-      await this.queue.saveMockGatewayOrder(orderId, paypalOrderId);
-
-      await this.queue.scheduleMockCaptureSuccess({
-        internalOrderId: orderId,
-        paypalOrderId,
-      });
-      return;
-    }
-
     const amountStr = Number(snapshot.amount).toFixed(2);
     const currency = snapshot.currency.toUpperCase();
 
@@ -59,11 +45,19 @@ export class CreatePaymentIntentJobHandler implements ICommandHandler<CreatePaym
       }),
     );
 
-    // Persist gateway result under lock (idempotent).
+    if (mockEnabled) {
+      await this.queue.saveMockGatewayOrder(orderId, paypalOrderId);
+      await this.queue.scheduleMockCaptureSuccess({
+        internalOrderId: orderId,
+        paypalOrderId,
+      });
+      return;
+    }
+
     await this.queue.saveGatewayOrderResult({
       orderId,
       paypalOrderId,
-      approvalUrl,
+      approvalUrl: approvalUrl ?? '',
     });
   }
 }

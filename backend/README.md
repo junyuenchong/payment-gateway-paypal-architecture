@@ -41,6 +41,7 @@ backend/
     │   ├── bullmq/           # Queues + workers
     │   ├── locks/            # Distributed Redis locks
     │   ├── idempotency/      # Webhook deduplication
+    │   ├── ops/              # DLQ list/replay + queue metrics
     │   ├── payment-gateway/  # PayPal + mock checkout
     │   ├── reconciliation/   # Stuck PROCESSING order sweeps
     │   └── queue/            # Enqueue jobs + CQRS job handlers

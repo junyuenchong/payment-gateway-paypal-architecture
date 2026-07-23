@@ -34,10 +34,10 @@ Open **http://localhost:8080**.
 
 ## Env vars
 
-| Variable | Default | What it does |
-| -------- | ------- | ------------ |
-| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:3000` | Where the Nest API lives |
-| `NEXT_PUBLIC_PAYPAL_SUPPORTED_CURRENCIES` | `MYR` | Currencies shown in the UI |
+| Variable                                  | Default                 | What it does               |
+| ----------------------------------------- | ----------------------- | -------------------------- |
+| `NEXT_PUBLIC_API_BASE_URL`                | `http://localhost:3000` | Where the Nest API lives   |
+| `NEXT_PUBLIC_PAYPAL_SUPPORTED_CURRENCIES` | `MYR`                   | Currencies shown in the UI |
 
 If checkout fails with network errors, this URL is usually wrong or the backend isn’t running.
 

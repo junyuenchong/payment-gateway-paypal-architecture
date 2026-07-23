@@ -4,7 +4,7 @@ export type CreateOrderLineItem = {
   unitPrice: number;
 };
 
-/** ----- Handle creat rde ommand class ----- **/
+/** ----- Handle create order command. ----- **/
 export class CreateOrderCommand {
   /** ----- Create Order Command Payload ----- **/
   constructor(
@@ -12,5 +12,6 @@ export class CreateOrderCommand {
     public readonly currency: string | undefined,
     public readonly externalRef: string | undefined,
     public readonly items: CreateOrderLineItem[] | undefined,
+    public readonly idempotencyKey: string | undefined,
   ) {}
 }

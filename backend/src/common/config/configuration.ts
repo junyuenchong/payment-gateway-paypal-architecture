@@ -127,5 +127,19 @@ export default (): AppConfiguration => {
         10 * 60 * 1000,
       ),
     },
+    rateLimit: {
+      ttlMs: parsePositiveInt(process.env.RATE_LIMIT_TTL_MS, 60_000),
+      limit: parsePositiveInt(process.env.RATE_LIMIT_LIMIT, 120),
+      paymentTtlMs: parsePositiveInt(
+        process.env.RATE_LIMIT_PAYMENT_TTL_MS,
+        60_000,
+      ),
+      paymentLimit: parsePositiveInt(process.env.RATE_LIMIT_PAYMENT_LIMIT, 30),
+      webhookTtlMs: parsePositiveInt(
+        process.env.RATE_LIMIT_WEBHOOK_TTL_MS,
+        60_000,
+      ),
+      webhookLimit: parsePositiveInt(process.env.RATE_LIMIT_WEBHOOK_LIMIT, 180),
+    },
   };
 };

@@ -58,6 +58,11 @@ export class AppConfigService {
     return this.values.reconciliation;
   }
 
+  /** ----- HTTP rate limit settings (IP or x-api-key). ----- **/
+  get rateLimit(): AppConfiguration['rateLimit'] {
+    return this.values.rateLimit;
+  }
+
   /** ----- True when NODE_ENV is production. ----- **/
   get isProduction(): boolean {
     return this.app.nodeEnv === 'production';

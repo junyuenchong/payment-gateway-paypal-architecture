@@ -9,6 +9,7 @@ import type { CreateOrderLineItem } from './cqrs/commands/create-order.command';
 import { CommandBus } from '@nestjs/cqrs';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 import { AppConfigService } from '../../common/config';
 import {
@@ -110,27 +111,61 @@ export class OrderService implements OnModuleInit {
     currency?: string;
     externalRef?: string;
     items?: CreateOrderLineItem[];
+    idempotencyKey?: string;
   }): Promise<{ id: string; idempotencyKey: string }> {
     this.validateOrderAmount(params.amount, params.items);
-    // Set currency, falling back to config or MYR default
     const currency = (
       params.currency ?? this.cfg.paypal.currency
     ).toUpperCase();
 
-    // Generate unique idempotency key for this order
-    const idempotencyKey = `order_${randomUUID()}`;
+    // Prefer client Idempotency-Key; otherwise mint a server-side key
+    const clientKey = params.idempotencyKey?.trim();
+    const idempotencyKey =
+      clientKey && clientKey.length > 0 ? clientKey : `order_${randomUUID()}`;
 
-    // Create order record in the database repository
-    const order = await this.insertOrder({
-      amount: params.amount,
-      currency,
-      externalRef: params.externalRef,
-      idempotencyKey,
-      items: params.items,
-    });
+    // Same key again: return the existing order (safe client retries)
+    if (clientKey) {
+      const existing = await this.prisma.order.findUnique({
+        where: { idempotencyKey },
+        select: { id: true, idempotencyKey: true },
+      });
+      if (existing) {
+        return {
+          id: existing.id,
+          idempotencyKey: existing.idempotencyKey,
+        };
+      }
+    }
 
-    // Return new order id and idempotency key for caller
-    return { id: order.id, idempotencyKey: order.idempotencyKey };
+    try {
+      const order = await this.insertOrder({
+        amount: params.amount,
+        currency,
+        externalRef: params.externalRef,
+        idempotencyKey,
+        items: params.items,
+      });
+      return { id: order.id, idempotencyKey: order.idempotencyKey };
+    } catch (error: unknown) {
+      // Race: two requests with the same key — winner created the row
+      if (
+        error instanceof PrismaClientKnownRequestError &&
+        error.code === 'P2002' &&
+        clientKey
+      ) {
+        const existing = await this.prisma.order.findUnique({
+          where: { idempotencyKey },
+          select: { id: true, idempotencyKey: true },
+        });
+        if (existing) {
+          return {
+            id: existing.id,
+            idempotencyKey: existing.idempotencyKey,
+          };
+        }
+      }
+      throw error;
+    }
   }
 
   /** ----- Create payment intent and enqueue checkout creation. ----- **/
@@ -633,5 +668,4 @@ export class OrderService implements OnModuleInit {
       take: params.take,
     });
   }
-
 }
