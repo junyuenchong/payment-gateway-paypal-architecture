@@ -1,5 +1,10 @@
 import { HttpService } from '@nestjs/axios';
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 import { AppConfigService } from '../../common/config';
@@ -8,7 +13,10 @@ import { IdempotencyService } from '../../infrastructure/idempotency/idempotency
 import { RedisLockService } from '../../infrastructure/locks/redis-lock.service';
 import { QueueService } from '../../infrastructure/queue/queue.service';
 import { InventoryService } from '../inventory/inventory.service';
-import { OrderStatus, type OrderStatusCode } from '../order/enums/order-status.enum';
+import {
+  OrderStatus,
+  type OrderStatusCode,
+} from '../order/enums/order-status.enum';
 import { PrismaService } from '../../infrastructure/database/prisma/prisma.service';
 import { RowLockService } from '../../infrastructure/database/prisma/locks/row-lock.service';
 import { WebhookEventStatus } from './enums/webhook-event-status.enum';
@@ -67,7 +75,7 @@ export class WebhookService {
       }
 
       const eventId = parsed.id;
-      if (!eventId) {
+      if (typeof eventId !== 'string' || !eventId.trim()) {
         throw new BadRequestException('Missing event id');
       }
 
@@ -76,7 +84,11 @@ export class WebhookService {
         `lock:webhook:event:${eventId}`,
         15000,
       );
-      if (!lock) return { duplicate: true };
+      if (!lock) {
+        throw new ServiceUnavailableException(
+          'Webhook ingestion in progress; retry delivery',
+        );
+      }
 
       try {
         // Short-circuit if provider event was already accepted
@@ -119,6 +131,16 @@ export class WebhookService {
             e instanceof PrismaClientKnownRequestError &&
             e.code === 'P2002'
           ) {
+            const pending =
+              await this.idempotency.findWebhookByExternalEventId(eventId);
+            if (!pending) {
+              throw new ServiceUnavailableException(
+                'Webhook persistence incomplete; retry delivery',
+              );
+            }
+            if (pending.status === WebhookEventStatus.RECEIVED) {
+              await this.queue.processWebhook(pending.id);
+            }
             return { duplicate: true };
           }
           throw e;

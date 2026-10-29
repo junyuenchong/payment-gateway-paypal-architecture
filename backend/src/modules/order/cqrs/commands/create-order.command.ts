@@ -11,7 +11,7 @@ export class CreateOrderCommand {
     public readonly amount: number,
     public readonly currency: string | undefined,
     public readonly externalRef: string | undefined,
-    public readonly items: CreateOrderLineItem[] | undefined,
+    public readonly items: CreateOrderLineItem[],
     public readonly idempotencyKey: string | undefined,
   ) {}
 }

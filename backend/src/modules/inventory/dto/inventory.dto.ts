@@ -23,8 +23,6 @@ export type ProductAvailabilityDto = {
   name: string;
   /** Physical on-hand (`Product.stock` / total_stock) */
   totalStock: number;
-  /** @deprecated Use totalStock — kept for backward compatibility */
-  onHand: number;
   reserved: number;
   available: number;
   version: number;

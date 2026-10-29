@@ -24,7 +24,10 @@ import {
   StockReservationStatus,
   TERMINAL_STOCK_RESERVATION_STATUSES,
 } from './enums/stock-reservation-status.enum';
-import { buildReservationKey, sortSkusForLock } from './helpers/inventory.helper';
+import {
+  buildReservationKey,
+  sortSkusForLock,
+} from './helpers/inventory.helper';
 import { assertProductInventoryInvariant } from './helpers/inventory.invariant';
 import { availableStock } from './helpers/inventory.snapshot';
 
@@ -143,7 +146,6 @@ export class InventoryService implements OnModuleInit {
         sku: p.sku,
         name: p.name,
         totalStock: p.stock,
-        onHand: p.stock,
         reserved: p.reservedStock,
         available: availableStock({
           totalStock: p.stock,
@@ -565,7 +567,7 @@ export class InventoryService implements OnModuleInit {
     void params.expiresAt;
     void params.reason;
 
-    const updated = (await tx.$queryRaw<ProductRow[]>`
+    const updated = await tx.$queryRaw<ProductRow[]>`
       UPDATE "Product"
       SET
         "reservedStock" = "reservedStock" + ${params.quantity},
@@ -574,15 +576,13 @@ export class InventoryService implements OnModuleInit {
       WHERE sku = ${params.sku}
         AND stock - "reservedStock" >= ${params.quantity}
       RETURNING id, sku, stock, "reservedStock"
-    `) as ProductRow[];
+    `;
 
     if (updated.length === 0) {
       const snapshot = await tx.product.findUnique({
         where: { sku: params.sku },
       });
-      const available = snapshot
-        ? snapshot.stock - snapshot.reservedStock
-        : 0;
+      const available = snapshot ? snapshot.stock - snapshot.reservedStock : 0;
       throw new BadRequestException(
         `Insufficient stock for ${params.sku} (need ${params.quantity}, available ${available})`,
       );
@@ -647,5 +647,4 @@ export class InventoryService implements OnModuleInit {
       },
     });
   }
-
 }

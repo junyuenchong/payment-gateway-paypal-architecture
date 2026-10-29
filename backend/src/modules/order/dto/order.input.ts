@@ -11,7 +11,7 @@ export const CreateOrderInputSchema = z.object({
   amount: z.number().min(0.01),
   currency: z.string().length(3).optional(),
   externalRef: z.string().optional(),
-  items: z.array(OrderLineItemInputSchema).min(1).optional(),
+  items: z.array(OrderLineItemInputSchema).min(1),
 });
 
 export const OrderIdParamInputSchema = z.object({

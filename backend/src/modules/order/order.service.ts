@@ -91,7 +91,16 @@ export class OrderService implements OnModuleInit {
     amount: number,
     items: CreateOrderLineItem[] | undefined,
   ): void {
-    if (!items || items.length === 0) return;
+    if (!items || items.length === 0) {
+      throw new BadRequestException('At least one order item is required');
+    }
+    if (
+      items.some(
+        (item) => !Number.isSafeInteger(item.quantity) || item.quantity < 1,
+      )
+    ) {
+      throw new BadRequestException('Item quantity must be a positive integer');
+    }
 
     const expected = Number(
       items
@@ -110,7 +119,7 @@ export class OrderService implements OnModuleInit {
     amount: number;
     currency?: string;
     externalRef?: string;
-    items?: CreateOrderLineItem[];
+    items: CreateOrderLineItem[];
     idempotencyKey?: string;
   }): Promise<{ id: string; idempotencyKey: string }> {
     this.validateOrderAmount(params.amount, params.items);
@@ -430,7 +439,7 @@ export class OrderService implements OnModuleInit {
     currency: string;
     externalRef?: string;
     idempotencyKey: string;
-    items?: CreateOrderLineItem[];
+    items: CreateOrderLineItem[];
   }) {
     const { items, ...orderData } = params;
     return this.prisma.$transaction(async (tx) => {
@@ -444,17 +453,15 @@ export class OrderService implements OnModuleInit {
         },
       });
 
-      if (items && items.length > 0) {
-        await tx.orderLineItem.createMany({
-          data: items.map((item) => ({
-            orderId: order.id,
-            sku: item.sku,
-            quantity: item.quantity,
-            unitPrice: new Prisma.Decimal(item.unitPrice),
-          })),
-        });
-        await this.inventory.reserveAtCheckout(order.id, tx);
-      }
+      await tx.orderLineItem.createMany({
+        data: items.map((item) => ({
+          orderId: order.id,
+          sku: item.sku,
+          quantity: item.quantity,
+          unitPrice: new Prisma.Decimal(item.unitPrice),
+        })),
+      });
+      await this.inventory.reserveAtCheckout(order.id, tx);
 
       return order;
     });
